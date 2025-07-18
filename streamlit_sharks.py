@@ -5,7 +5,7 @@ import os
 import subprocess
 import sys
 from datetime import datetime
-from analyze_sharks import process_nasdaq_data, analyze_ticker, process_file, detect_volume_pattern
+from analyze_sharks import process_nasdaq_data, analyze_ticker, process_file
 
 # Configuração da página
 st.set_page_config(
