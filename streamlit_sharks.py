@@ -20,12 +20,6 @@ st.set_page_config(
 def main():
     st.title("🦈 SHARK DETECTION")
     
-    # Status dos dados
-    if check_data_availability():
-        st.sidebar.success("✅ Data available")
-    else:
-        st.sidebar.warning("⚠️ No data found")
-    
     # Botão de download
     if st.sidebar.button("📥 Download Today's Data", disabled=True):
         download_data()
