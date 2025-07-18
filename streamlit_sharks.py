@@ -5,7 +5,7 @@ import os
 import subprocess
 import sys
 from datetime import datetime
-from shark_analyzer import SharkAnalyzer
+from analyze_sharks import process_nasdaq_data, analyze_ticker, process_file, detect_volume_pattern
 
 # Configuração da página
 st.set_page_config(
@@ -145,37 +145,21 @@ def check_data_availability():
 
 def run_analysis(min_volume_usd, volume_ratio_min, spike_multiplier,
                 silent_sharks_threshold, enable_pattern_detection):
-    """Run shark analysis with custom parameters"""
+    """Run shark analysis using analyze_sharks.py functions"""
     
     st.info("🔍 Starting shark analysis...")
     
-    # Create analyzer with custom parameters
-    analyzer = SharkAnalyzer(
-        min_volume_usd=min_volume_usd,
-        volume_ratio_min=volume_ratio_min,
-        spike_multiplier=spike_multiplier,
-        min_price_90d=1.0,  # Fixed - now handled in display filters
-        min_current_price=1.0,  # Fixed - now handled in display filters
-        allow_negative_performance=False,
-        silent_sharks_threshold=silent_sharks_threshold,
-        min_data_days=90,
-        filter_derivatives=False,  # Fixed - now handled in display filters
-        enable_pattern_detection=enable_pattern_detection
-    )
-    
-    # Run analysis with progress tracking
+    # Progress tracking
     progress_bar = st.progress(0)
     status_text = st.empty()
     log_container = st.container()
     
     with log_container:
         log_placeholder = st.empty()
-        
-        # Capture logs
         logs = []
         
-        def log_callback(message):
-            logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
+        def log_message(msg):
+            logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
             log_placeholder.text_area(
                 "Analysis Log:",
                 value="\n".join(logs[-15:]),
@@ -183,17 +167,15 @@ def run_analysis(min_volume_usd, volume_ratio_min, spike_multiplier,
                 disabled=True
             )
         
-        def progress_callback(p):
-            progress_bar.progress(p)
-            
-        def status_callback(s):
-            status_text.text(s)
+        # Call the process_nasdaq_data function directly
+        log_message("🦈 DETECTANDO SMART MONEY - NADAR COM OS SHARKS")
+        progress_bar.progress(0.1)
+        status_text.text("Loading data files...")
         
-        # Run analysis
-        sharks_df, silent_sharks_df = analyzer.analyze(
-            progress_callback=progress_callback,
-            status_callback=status_callback,
-            log_callback=log_callback
+        # Execute analysis (simplified version without the class)
+        sharks_df, silent_sharks_df = run_sharks_analysis_simple(
+            min_volume_usd, volume_ratio_min, silent_sharks_threshold,
+            log_message, progress_bar, status_text
         )
     
     progress_bar.progress(1.0)
@@ -201,6 +183,145 @@ def run_analysis(min_volume_usd, volume_ratio_min, spike_multiplier,
     
     # Display results
     display_results(sharks_df, silent_sharks_df)
+
+def run_sharks_analysis_simple(min_volume_usd, volume_ratio_min, silent_sharks_threshold, 
+                              log_func, progress_bar, status_text):
+    """Simplified version of shark analysis for Streamlit"""
+    import multiprocessing as mp
+    
+    # 1. Collect files
+    all_files = []
+    for data_dir in ['nasdaq_database', 'additional_database']:
+        if os.path.exists(data_dir):
+            files = [(os.path.join(data_dir, f), f) for f in os.listdir(data_dir) if f.endswith('.csv')]
+            all_files.extend(files)
+    
+    if not all_files:
+        log_func("❌ No CSV files found")
+        return None, None
+    
+    log_func(f"📊 Processing {len(all_files)} files...")
+    progress_bar.progress(0.2)
+    
+    # 2. Process files (simplified, sequential for Streamlit)
+    processed = []
+    for i, file_info in enumerate(all_files):
+        result = process_file(file_info)
+        if result is not None:
+            processed.append(result)
+        if i % 1000 == 0:
+            progress = 0.2 + 0.4 * i / len(all_files)
+            progress_bar.progress(progress)
+    
+    if not processed:
+        log_func("❌ No valid data found")
+        return None, None
+    
+    # 3. Consolidate data
+    status_text.text("Consolidating data...")
+    df = pd.concat(processed, ignore_index=True)
+    log_func(f"✅ Data loaded: {len(df):,} records from {df['ticker'].nunique()} tickers")
+    progress_bar.progress(0.6)
+    
+    # 4. Analyze each ticker
+    status_text.text("Analyzing tickers for shark patterns...")
+    ticker_groups = [group for _, group in df.groupby('ticker')]
+    analyzed = []
+    
+    for i, ticker_group in enumerate(ticker_groups):
+        result = analyze_ticker_simple(ticker_group, min_volume_usd, volume_ratio_min)
+        if result is not None:
+            analyzed.append(result)
+        
+        if i % 500 == 0:
+            progress = 0.6 + 0.3 * i / len(ticker_groups)
+            progress_bar.progress(progress)
+    
+    if not analyzed:
+        log_func("❌ No sharks detected")
+        return None, None
+    
+    # 5. Create results
+    progress_bar.progress(0.95)
+    sharks_df = pd.DataFrame(analyzed)
+    sharks_df = sharks_df.sort_values('score', ascending=False)
+    
+    # Create silent sharks
+    silent_sharks_df = sharks_df[sharks_df['change_7d'] <= silent_sharks_threshold]
+    
+    log_func(f"🦈 {len(sharks_df)} sharks detected!")
+    log_func(f"🤫 {len(silent_sharks_df)} silent sharks detected!")
+    
+    return sharks_df, silent_sharks_df
+
+def analyze_ticker_simple(ticker_data, min_volume_usd, volume_ratio_min):
+    """Simplified ticker analysis for Streamlit"""
+    try:
+        ticker_data = ticker_data.sort_values('Date')
+        ticker = ticker_data['ticker'].iloc[0]
+        
+        if len(ticker_data) < 90:
+            return None
+            
+        # Calculate volume in USD
+        ticker_data['volume_usd'] = ticker_data['Volume'] * ticker_data['Close']
+            
+        # Calculate averages
+        last_7d = ticker_data.tail(7)
+        previous_90d = ticker_data.iloc[-97:-7] if len(ticker_data) >= 97 else ticker_data.iloc[:-7]
+        
+        volume_usd_90d = previous_90d['volume_usd'].mean()
+        volume_usd_7d = last_7d['volume_usd'].mean()
+        volume_90d = previous_90d['Volume'].mean()
+        volume_7d = last_7d['Volume'].mean()
+        price_90d_avg = ticker_data['Close'].tail(90).mean()
+        
+        # Apply basic filters
+        if volume_usd_90d < min_volume_usd:
+            return None
+            
+        if price_90d_avg <= 1.0:  # Very basic price filter
+            return None
+        
+        # Calculate price changes
+        current_price = ticker_data['Close'].iloc[-1]
+        
+        if current_price <= 1.0:
+            return None
+            
+        price_7d_ago = ticker_data['Close'].iloc[-7]
+        price_30d_ago = ticker_data['Close'].iloc[-30]
+        
+        price_change_7d = ((current_price - price_7d_ago) / price_7d_ago) * 100
+        price_change_30d = ((current_price - price_30d_ago) / price_30d_ago) * 100
+        
+        # Filter negative performance
+        if price_change_7d <= 0 or price_change_30d <= 0:
+            return None
+        
+        # Volume ratio calculation
+        volume_ratio = volume_usd_7d / volume_usd_90d if volume_usd_90d > 0 else 0
+        
+        # Check volume ratio
+        if volume_ratio >= volume_ratio_min:
+            score = volume_ratio * (1 + price_change_7d / 100)
+            
+            return {
+                'ticker': ticker,
+                'ratio': volume_ratio,
+                'volume_7d': volume_7d,
+                'volume_90d': volume_90d,
+                'volume_usd_7d': volume_usd_7d,
+                'volume_usd_90d': volume_usd_90d,
+                'price': current_price,
+                'price_90d_avg': price_90d_avg,
+                'change_7d': price_change_7d,
+                'change_30d': price_change_30d,
+                'score': score
+            }
+    except Exception as e:
+        pass
+    return None
 
 def display_results(sharks_df, silent_sharks_df):
     """Display analysis results with tables and charts"""
@@ -249,26 +370,31 @@ def display_results(sharks_df, silent_sharks_df):
     with col5:
         hide_derivatives = st.checkbox("Hide Derivatives", value=False, help="Hide warrants, units, rights, etc.")
     
-    # Aplicar filtros de visualização
+    # Aplicar filtros de visualização (com debug)
     filtered_df = sharks_df.copy()
+    st.write(f"🐛 Debug: Starting with {len(filtered_df)} sharks")
     
     # Filtrar por volume ratio mínimo
     filtered_df = filtered_df[filtered_df['ratio'] >= display_min_ratio]
+    st.write(f"🐛 Debug: After ratio filter (>={display_min_ratio}): {len(filtered_df)} sharks")
     
     # Filtrar por mudança de preço máxima
     filtered_df = filtered_df[filtered_df['change_7d'] <= display_max_change]
+    st.write(f"🐛 Debug: After max change filter (<={display_max_change}%): {len(filtered_df)} sharks")
     
     # Filtrar por preço mínimo
     filtered_df = filtered_df[filtered_df['price'] >= display_min_price]
+    st.write(f"🐛 Debug: After min price filter (>=${display_min_price}): {len(filtered_df)} sharks")
     
     # Filtrar derivatives se marcado
     if hide_derivatives:
-        # Filtrar tickers que terminam com sufixos de derivatives
         filtered_df = filtered_df[~filtered_df['ticker'].str.endswith(('W', 'WS', 'U', 'R', 'P', 'PR', 'X', 'L', 'Z'))]
+        st.write(f"🐛 Debug: After derivatives filter: {len(filtered_df)} sharks")
     
     # Filtrar apenas silent sharks se marcado
     if show_silent_only:
         filtered_df = filtered_df[filtered_df['change_7d'] <= 5.0]
+        st.write(f"🐛 Debug: After silent sharks filter (<=5%): {len(filtered_df)} sharks")
     
     # Tabela de sharks filtrados
     st.subheader(f"🦈 Sharks Found ({len(filtered_df)} results)")
