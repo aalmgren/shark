@@ -256,7 +256,8 @@ def display_results(sharks_df, silent_sharks_df):
         silent_count = len(silent_sharks_df) if silent_sharks_df is not None else 0
         st.metric("🤫 Silent Sharks", silent_count)
     
-    # Filtros para os resultados
+    # Filtros para os resultados (só aparecem quando há dados)
+    st.subheader("🎛️ Filter Results")
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -271,8 +272,11 @@ def display_results(sharks_df, silent_sharks_df):
     # Aplicar filtros
     filtered_df = sharks_df.copy()
     
+    # Calcular threshold para silent sharks
+    silent_threshold = 5.0  # valor padrão do silent_sharks_threshold
+    
     if show_silent_only:
-        filtered_df = filtered_df[filtered_df['change_7d'] <= silent_sharks_threshold]
+        filtered_df = filtered_df[filtered_df['change_7d'] <= silent_threshold]
     
     filtered_df = filtered_df[
         (filtered_df['ratio'] >= min_volume_ratio) & 
@@ -308,27 +312,27 @@ def display_results(sharks_df, silent_sharks_df):
             height=600
         )
     
-    # Download buttons
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if len(filtered_df) > 0:
-            csv_data = filtered_df.to_csv(index=False)
+        # Download buttons
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if len(filtered_df) > 0:
+                csv_data = filtered_df.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download Filtered Results",
+                    data=csv_data,
+                    file_name=f"sharks_filtered_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                    mime="text/csv"
+                )
+        
+        with col2:
+            csv_data_all = sharks_df.to_csv(index=False)
             st.download_button(
-                label="📥 Download Filtered Results",
-                data=csv_data,
-                file_name=f"sharks_filtered_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                label="📥 Download All Sharks",
+                data=csv_data_all,
+                file_name=f"sharks_all_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
                 mime="text/csv"
             )
-    
-    with col2:
-        csv_data_all = sharks_df.to_csv(index=False)
-        st.download_button(
-            label="📥 Download All Sharks",
-            data=csv_data_all,
-            file_name=f"sharks_all_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-            mime="text/csv"
-        )
 
 def show_instructions():
     """Show initial instructions"""
