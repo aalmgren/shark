@@ -264,24 +264,27 @@ def display_results(sharks_df, silent_sharks_df):
         show_silent_only = st.checkbox("🤫 Only Silent Sharks", help="Show only stocks with low price movement")
     
     with col2:
-        min_volume_ratio = st.slider("Min Volume Ratio", 1.5, 10.0, 1.5, 0.1, format="%.1fx")
+        min_volume_ratio = st.slider("Min Volume Ratio", 1.0, 10.0, 1.0, 0.1, format="%.1fx")
     
     with col3:
-        max_price_change = st.slider("Max Price Change (%)", 0.0, 50.0, 50.0, 1.0, format="%.0f%%")
+        max_price_change = st.slider("Max Price Change (%)", 0.0, 100.0, 100.0, 1.0, format="%.0f%%")
     
-    # Aplicar filtros
+    # Aplicar filtros (debug info)
+    st.write(f"📊 Starting with {len(sharks_df)} sharks")
     filtered_df = sharks_df.copy()
     
-    # Calcular threshold para silent sharks
-    silent_threshold = 5.0  # valor padrão do silent_sharks_threshold
+    # Filtrar por volume ratio
+    filtered_df = filtered_df[filtered_df['ratio'] >= min_volume_ratio]
+    st.write(f"📊 After volume ratio filter: {len(filtered_df)} sharks")
     
+    # Filtrar por mudança de preço máxima
+    filtered_df = filtered_df[filtered_df['change_7d'] <= max_price_change]
+    st.write(f"📊 After price change filter: {len(filtered_df)} sharks")
+    
+    # Filtrar apenas silent sharks se marcado
     if show_silent_only:
-        filtered_df = filtered_df[filtered_df['change_7d'] <= silent_threshold]
-    
-    filtered_df = filtered_df[
-        (filtered_df['ratio'] >= min_volume_ratio) & 
-        (filtered_df['change_7d'] <= max_price_change)
-    ]
+        filtered_df = filtered_df[filtered_df['change_7d'] <= 5.0]
+        st.write(f"📊 After silent sharks filter: {len(filtered_df)} sharks")
     
     # Tabela de sharks filtrados
     st.subheader(f"🦈 Sharks Found ({len(filtered_df)} results)")
