@@ -15,6 +15,89 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# CSS para reduzir espaço no topo
+st.markdown("""
+<style>
+    .main > div {
+        padding-top: 1rem;
+    }
+    .block-container {
+        padding-top: 1rem;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+def save_analysis_params(volume_period_long, volume_period_short, volume_ratio_min, silent_sharks_threshold):
+    """Salva os parâmetros da análise em arquivo JSON"""
+    try:
+        import json
+        params = {
+            'volume_period_long': volume_period_long,
+            'volume_period_short': volume_period_short,
+            'volume_ratio_min': volume_ratio_min,
+            'silent_sharks_threshold': silent_sharks_threshold,
+            'timestamp': datetime.now().isoformat()
+        }
+        with open('analysis_params.json', 'w') as f:
+            json.dump(params, f)
+    except Exception as e:
+        st.error(f"❌ Erro ao salvar parâmetros: {str(e)}")
+
+def load_analysis_params():
+    """Carrega os parâmetros da última análise"""
+    try:
+        import json
+        if os.path.exists('analysis_params.json'):
+            with open('analysis_params.json', 'r') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    
+    # Parâmetros padrão se não conseguir carregar
+    return {
+        'volume_period_long': 60,
+        'volume_period_short': 7,
+        'volume_ratio_min': 1.5,
+        'silent_sharks_threshold': 5.0
+    }
+
+def load_saved_results():
+    """Carrega os resultados salvos dos arquivos CSV"""
+    try:
+        # Verificar se os arquivos existem
+        sharks_file = "institutional_accumulation_candidates.csv"
+        silent_sharks_file = "silent_sharks.csv"
+        
+        if os.path.exists(sharks_file):
+            # Obter data de modificação do arquivo
+            import time
+            file_time = os.path.getmtime(sharks_file)
+            file_date = datetime.fromtimestamp(file_time).strftime('%Y-%m-%d %H:%M')
+            
+            # Carregar parâmetros da última análise
+            params = load_analysis_params()
+            
+            # Mostrar informação na sidebar
+            st.sidebar.markdown("---")
+            st.sidebar.markdown(f"📅 **Last Analysis:** {file_date}")
+            st.sidebar.markdown(f"⚙️ **Parameters:** {params['volume_period_short']}D / {params['volume_period_long']}D")
+            
+            sharks_df = pd.read_csv(sharks_file)
+            silent_sharks_df = None
+            
+            if os.path.exists(silent_sharks_file):
+                silent_sharks_df = pd.read_csv(silent_sharks_file)
+            else:
+                # Criar silent sharks a partir dos dados principais
+                silent_sharks_df = sharks_df[sharks_df['change_7d'] <= params['silent_sharks_threshold']]
+            
+            return sharks_df, silent_sharks_df, params
+        
+    except Exception as e:
+        st.error(f"❌ Erro ao carregar dados salvos: {str(e)}")
+    
+    return None, None, None
+
 def main():
     st.title("🦈 SHARK DETECTION")
     
@@ -30,54 +113,28 @@ def main():
     
     st.sidebar.markdown("---")
     st.sidebar.subheader("⚙️ Analysis Parameters")
-    st.sidebar.caption("These affect HOW sharks are detected")
+    st.sidebar.caption("These affect HOW institutional accumulation is detected")
     
-    # Parâmetros de análise
-    min_volume_usd = st.sidebar.slider(
-        "Min daily volume (USD)",
-        min_value=1_000_000,
-        max_value=50_000_000,
-        value=10_000_000,
-        step=1_000_000,
-        format="$%dM",
-        help="Minimum average daily volume in USD over 90 days"
-    ) 
-    
-    volume_ratio_min = st.sidebar.slider(
-        "Volume spike ratio",
-        min_value=1.0,
-        max_value=5.0,
-        value=1.5,
-        step=0.1,
-        format="%.1fx",
-        help="Minimum ratio of 7-day vs 90-day average volume"
+    # Parâmetros essenciais de período
+    volume_period_long = st.sidebar.slider(
+        "Volume baseline period (days)",
+        min_value=0,
+        max_value=90,
+        value=60,
+        step=5,
+        help="Period for calculating average baseline volume"
     )
     
-    spike_multiplier = st.sidebar.slider(
-        "Spike detection multiplier",
-        min_value=1.5,
-        max_value=4.0,
-        value=2.0,
-        step=0.1,
-        format="%.1fx",
-        help="Volume multiplier to detect spikes for pattern analysis"
+    volume_period_short = st.sidebar.slider(
+        "Volume spike period (days)",
+        min_value=0,
+        max_value=10,
+        value=7,
+        step=1,
+        help="Period for detecting volume increases"
     )
     
-    silent_sharks_threshold = st.sidebar.slider(
-        "Silent sharks threshold",
-        min_value=0.0,
-        max_value=15.0,
-        value=5.0,
-        step=0.5,
-        format="%.1f%%",
-        help="Maximum 7-day change for silent sharks category"
-    )
-    
-    enable_pattern_detection = st.sidebar.checkbox(
-        "Enable price pattern detection",
-        value=True,
-        help="Reject stocks with declining prices after volume spikes"
-    )
+
     
     # Main content area
     if analyze_button:
@@ -86,14 +143,16 @@ def main():
             return
             
         run_analysis(
-            min_volume_usd=min_volume_usd,
-            volume_ratio_min=volume_ratio_min,
-            spike_multiplier=spike_multiplier,
-            silent_sharks_threshold=silent_sharks_threshold,
-            enable_pattern_detection=enable_pattern_detection
+            volume_period_long=volume_period_long,
+            volume_period_short=volume_period_short
         )
     else:
-        show_instructions()
+        # Carregar automaticamente os dados salvos quando a página abre
+        sharks_df, silent_sharks_df, params = load_saved_results()
+        if sharks_df is not None:
+            display_results(sharks_df, silent_sharks_df, params, is_saved_data=True)
+        else:
+            show_instructions()
 
 def download_data():
     """Execute download script and show progress"""
@@ -143,9 +202,15 @@ def check_data_availability():
             return True
     return False
 
-def run_analysis(min_volume_usd, volume_ratio_min, spike_multiplier,
-                silent_sharks_threshold, enable_pattern_detection):
+def run_analysis(volume_period_long, volume_period_short):
     """Run shark analysis using analyze_sharks.py functions"""
+    
+    # Fixed values for hidden parameters
+    volume_ratio_min = 1.5
+    silent_sharks_threshold = 5.0
+    
+    # Save analysis parameters
+    save_analysis_params(volume_period_long, volume_period_short, volume_ratio_min, silent_sharks_threshold)
     
     st.info("🔍 Starting shark analysis...")
     
@@ -174,17 +239,25 @@ def run_analysis(min_volume_usd, volume_ratio_min, spike_multiplier,
         
         # Execute analysis (simplified version without the class)
         sharks_df, silent_sharks_df = run_sharks_analysis_simple(
-            min_volume_usd, volume_ratio_min, silent_sharks_threshold,
+            volume_period_long, volume_period_short, volume_ratio_min, silent_sharks_threshold,
             log_message, progress_bar, status_text
         )
     
     progress_bar.progress(1.0)
     status_text.text("✅ Analysis completed!")
     
+    # Create params dict for display
+    params = {
+        'volume_period_long': volume_period_long,
+        'volume_period_short': volume_period_short,
+        'volume_ratio_min': volume_ratio_min,
+        'silent_sharks_threshold': silent_sharks_threshold
+    }
+    
     # Display results
-    display_results(sharks_df, silent_sharks_df)
+    display_results(sharks_df, silent_sharks_df, params)
 
-def run_sharks_analysis_simple(min_volume_usd, volume_ratio_min, silent_sharks_threshold, 
+def run_sharks_analysis_simple(volume_period_long, volume_period_short, volume_ratio_min, silent_sharks_threshold, 
                               log_func, progress_bar, status_text):
     """Simplified version of shark analysis for Streamlit"""
     import multiprocessing as mp
@@ -229,7 +302,7 @@ def run_sharks_analysis_simple(min_volume_usd, volume_ratio_min, silent_sharks_t
     analyzed = []
     
     for i, ticker_group in enumerate(ticker_groups):
-        result = analyze_ticker_simple(ticker_group, min_volume_usd, volume_ratio_min)
+        result = analyze_ticker_simple(ticker_group, volume_period_long, volume_period_short, volume_ratio_min)
         if result is not None:
             analyzed.append(result)
         
@@ -254,33 +327,41 @@ def run_sharks_analysis_simple(min_volume_usd, volume_ratio_min, silent_sharks_t
     
     return sharks_df, silent_sharks_df
 
-def analyze_ticker_simple(ticker_data, min_volume_usd, volume_ratio_min):
+def analyze_ticker_simple(ticker_data, volume_period_long, volume_period_short, volume_ratio_min):
     """Simplified ticker analysis for Streamlit"""
     try:
         ticker_data = ticker_data.sort_values('Date')
         ticker = ticker_data['ticker'].iloc[0]
         
-        if len(ticker_data) < 90:
+        # Validate minimum data requirement
+        min_required_data = max(volume_period_long + volume_period_short, 30)  # At least 30 days of data
+        if len(ticker_data) < min_required_data:
             return None
             
         # Calculate volume in USD
         ticker_data['volume_usd'] = ticker_data['Volume'] * ticker_data['Close']
             
-        # Calculate averages
-        last_7d = ticker_data.tail(7)
-        previous_90d = ticker_data.iloc[-97:-7] if len(ticker_data) >= 97 else ticker_data.iloc[:-7]
+        # Calculate averages using dynamic periods
+        if volume_period_short > 0:
+            last_short = ticker_data.tail(volume_period_short)
+            total_long_period = volume_period_long + volume_period_short
+            previous_long = ticker_data.iloc[-total_long_period:-volume_period_short] if len(ticker_data) >= total_long_period else ticker_data.iloc[:-volume_period_short]
+        else:
+            # If short period is 0, use last day as "spike" period
+            last_short = ticker_data.tail(1)
+            previous_long = ticker_data.tail(volume_period_long) if volume_period_long > 0 else ticker_data
         
-        volume_usd_90d = previous_90d['volume_usd'].mean()
-        volume_usd_7d = last_7d['volume_usd'].mean()
-        volume_90d = previous_90d['Volume'].mean()
-        volume_7d = last_7d['Volume'].mean()
-        price_90d_avg = ticker_data['Close'].tail(90).mean()
+        volume_usd_long = previous_long['volume_usd'].mean()
+        volume_usd_short = last_short['volume_usd'].mean()
+        volume_long = previous_long['Volume'].mean()
+        volume_short = last_short['Volume'].mean()
+        price_long_avg = ticker_data['Close'].tail(volume_period_long).mean() if volume_period_long > 0 else ticker_data['Close'].mean()
         
-        # Apply basic filters
-        if volume_usd_90d < min_volume_usd:
+        # Apply basic filters - use fixed minimum volume filter of $10M for simplicity
+        if volume_usd_long < 10_000_000:
             return None
             
-        if price_90d_avg <= 1.0:  # Very basic price filter
+        if price_long_avg <= 1.0:  # Very basic price filter
             return None
         
         # Calculate price changes
@@ -289,33 +370,37 @@ def analyze_ticker_simple(ticker_data, min_volume_usd, volume_ratio_min):
         if current_price <= 1.0:
             return None
             
-        price_7d_ago = ticker_data['Close'].iloc[-7]
-        price_30d_ago = ticker_data['Close'].iloc[-30]
+        if volume_period_short > 0:
+            price_short_ago = ticker_data['Close'].iloc[-volume_period_short]
+        else:
+            price_short_ago = current_price  # If no short period, use current price
         
-        price_change_7d = ((current_price - price_7d_ago) / price_7d_ago) * 100
-        price_change_30d = ((current_price - price_30d_ago) / price_30d_ago) * 100
+        price_30d_ago = ticker_data['Close'].iloc[-30] if len(ticker_data) >= 30 else ticker_data['Close'].iloc[0]
+        
+        price_change_short = ((current_price - price_short_ago) / price_short_ago) * 100 if price_short_ago > 0 else 0
+        price_change_30d = ((current_price - price_30d_ago) / price_30d_ago) * 100 if price_30d_ago > 0 else 0
         
         # Filter negative performance
-        if price_change_7d <= 0 or price_change_30d <= 0:
+        if price_change_short <= 0 or price_change_30d <= 0:
             return None
         
         # Volume ratio calculation
-        volume_ratio = volume_usd_7d / volume_usd_90d if volume_usd_90d > 0 else 0
+        volume_ratio = volume_usd_short / volume_usd_long if volume_usd_long > 0 else 0
         
         # Check volume ratio
         if volume_ratio >= volume_ratio_min:
-            score = volume_ratio * (1 + price_change_7d / 100)
+            score = volume_ratio * (1 + price_change_short / 100)
             
             return {
                 'ticker': ticker,
                 'ratio': volume_ratio,
-                'volume_7d': volume_7d,
-                'volume_90d': volume_90d,
-                'volume_usd_7d': volume_usd_7d,
-                'volume_usd_90d': volume_usd_90d,
+                'volume_7d': volume_short,
+                'volume_90d': volume_long,
+                'volume_usd_7d': volume_usd_short,
+                'volume_usd_90d': volume_usd_long,
                 'price': current_price,
-                'price_90d_avg': price_90d_avg,
-                'change_7d': price_change_7d,
+                'price_90d_avg': price_long_avg,
+                'change_7d': price_change_short,
                 'change_30d': price_change_30d,
                 'score': score
             }
@@ -323,9 +408,9 @@ def analyze_ticker_simple(ticker_data, min_volume_usd, volume_ratio_min):
         pass
     return None
 
-def display_results(sharks_df, silent_sharks_df):
+def display_results(sharks_df, silent_sharks_df, params, is_saved_data=False):
     """Display analysis results with tables and charts"""
-    st.header("📊 Results")
+    
     
     if sharks_df is None or len(sharks_df) == 0:
         st.warning("🦈 No sharks detected with current parameters. Try adjusting the filters.")
@@ -349,10 +434,6 @@ def display_results(sharks_df, silent_sharks_df):
         silent_count = len(silent_sharks_df) if silent_sharks_df is not None else 0
         st.metric("🤫 Silent Sharks", silent_count)
     
-    # Filtros de visualização (só aparecem quando há dados)
-    st.subheader("🔍 Display Filters")
-    st.caption("Filter the results below (does not re-run analysis)")
-    
     col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
@@ -362,39 +443,34 @@ def display_results(sharks_df, silent_sharks_df):
         display_min_ratio = st.slider("Min Ratio", 1.0, 10.0, 1.0, 0.1, format="%.1fx", help="Hide sharks below this ratio")
     
     with col3:
-        display_max_change = st.slider("Max Change", 0.0, 100.0, 100.0, 1.0, format="%.0f%%", help="Hide sharks above this change")
+        display_min_volume = st.slider("Min Volume", 0, 1000, 80, 10, format="$%dM", help="Hide sharks below this daily volume (millions USD)")
     
     with col4:
-        display_min_price = st.slider("Min Price", 1.0, 50.0, 1.0, 1.0, format="$%.0f", help="Hide stocks below this price")
+        display_min_price = st.slider("Min Price", 1.0, 50.0, 10.0, 1.0, format="$%.0f", help="Hide stocks below this price")
     
     with col5:
-        hide_derivatives = st.checkbox("Hide Derivatives", value=False, help="Hide warrants, units, rights, etc.")
+        hide_derivatives = st.checkbox("Hide Derivatives", value=True, help="Hide warrants, units, rights, etc.")
     
-    # Aplicar filtros de visualização (com debug)
+    # Aplicar filtros de visualização
     filtered_df = sharks_df.copy()
-    st.write(f"🐛 Debug: Starting with {len(filtered_df)} sharks")
     
     # Filtrar por volume ratio mínimo
     filtered_df = filtered_df[filtered_df['ratio'] >= display_min_ratio]
-    st.write(f"🐛 Debug: After ratio filter (>={display_min_ratio}): {len(filtered_df)} sharks")
     
-    # Filtrar por mudança de preço máxima
-    filtered_df = filtered_df[filtered_df['change_7d'] <= display_max_change]
-    st.write(f"🐛 Debug: After max change filter (<={display_max_change}%): {len(filtered_df)} sharks")
+    # Filtrar por volume mínimo (converter de milhões para USD)
+    min_volume_usd = display_min_volume * 1_000_000
+    filtered_df = filtered_df[filtered_df['volume_usd_7d'] >= min_volume_usd]
     
     # Filtrar por preço mínimo
     filtered_df = filtered_df[filtered_df['price'] >= display_min_price]
-    st.write(f"🐛 Debug: After min price filter (>=${display_min_price}): {len(filtered_df)} sharks")
     
     # Filtrar derivatives se marcado
     if hide_derivatives:
         filtered_df = filtered_df[~filtered_df['ticker'].str.endswith(('W', 'WS', 'U', 'R', 'P', 'PR', 'X', 'L', 'Z'))]
-        st.write(f"🐛 Debug: After derivatives filter: {len(filtered_df)} sharks")
     
     # Filtrar apenas silent sharks se marcado
     if show_silent_only:
         filtered_df = filtered_df[filtered_df['change_7d'] <= 5.0]
-        st.write(f"🐛 Debug: After silent sharks filter (<=5%): {len(filtered_df)} sharks")
     
     # Tabela de sharks filtrados
     st.subheader(f"🦈 Sharks Found ({len(filtered_df)} results)")
@@ -407,17 +483,23 @@ def display_results(sharks_df, silent_sharks_df):
         display_df['volume_usd_7d_M'] = display_df['volume_usd_7d'] / 1_000_000
         display_df['volume_usd_90d_M'] = display_df['volume_usd_90d'] / 1_000_000
         
+        # Create dynamic column labels based on analysis parameters
+        vol_short_label = f"Vol {params['volume_period_short']}D ($M)"
+        vol_long_label = f"Vol {params['volume_period_long']}D ($M)"
+        price_avg_label = f"Avg Price {params['volume_period_long']}D"
+        change_short_label = f"{params['volume_period_short']}D Change"
+        
         st.dataframe(
             display_df[['ticker', 'ratio', 'volume_usd_7d_M', 'volume_usd_90d_M', 
                        'price', 'price_90d_avg', 'change_7d', 'change_30d', 'score']].round(2),
             column_config={
                 'ticker': 'Ticker',
                 'ratio': st.column_config.NumberColumn('Volume Ratio', format="%.1fx"),
-                'volume_usd_7d_M': st.column_config.NumberColumn('Vol 7D ($M)', format="$%.1fM"),
-                'volume_usd_90d_M': st.column_config.NumberColumn('Vol 90D ($M)', format="$%.1fM"),
+                'volume_usd_7d_M': st.column_config.NumberColumn(vol_short_label, format="$%.1fM"),
+                'volume_usd_90d_M': st.column_config.NumberColumn(vol_long_label, format="$%.1fM"),
                 'price': st.column_config.NumberColumn('Current Price', format="$%.2f"),
-                'price_90d_avg': st.column_config.NumberColumn('Avg Price 90D', format="$%.2f"),
-                'change_7d': st.column_config.NumberColumn('7D Change', format="%.1f%%"),
+                'price_90d_avg': st.column_config.NumberColumn(price_avg_label, format="$%.2f"),
+                'change_7d': st.column_config.NumberColumn(change_short_label, format="%.1f%%"),
                 'change_30d': st.column_config.NumberColumn('30D Change', format="%.1f%%"),
                 'score': st.column_config.NumberColumn('Score', format="%.1f")
             },
@@ -450,9 +532,15 @@ def display_results(sharks_df, silent_sharks_df):
 def show_instructions():
     """Show initial instructions"""
     st.markdown("""
+    ## 🆕 No saved results found
+    
     **How to use:** Download data → Adjust filters (optional) → Run analysis
     
-    Click **Run Analysis** to start! 🏊‍♂️
+    Click **🔍 Run Shark Analysis** to start! 🏊‍♂️
+    
+    ---
+    
+    💡 **Tip:** After running an analysis, the results will be automatically displayed when you open the page next time.
     """)
 
 if __name__ == "__main__":

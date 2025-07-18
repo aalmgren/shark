@@ -26,35 +26,58 @@ def process_file(file_info):
         pass
     return None
 
-def detect_price_pattern(ticker_data):
-    """Detecta padrões de preço - rejeita apenas 3 dias consecutivos de queda após spike de volume"""
-    try:
-        ticker = ticker_data['ticker'].iloc[0]
+def detect_volume_pattern(ticker_data):
+    """Detecta padrões de volume - gradual ou recente"""
+    # Calcular MA3 do volume em dinheiro
+    ticker_data['volume_usd'] = ticker_data['Volume'] * ticker_data['Close']
+    ticker_data['volume_ma3'] = ticker_data['volume_usd'].rolling(window=3).mean()
+    
+    # Últimos 20 dias para análise
+    recent_data = ticker_data.tail(20).copy()
+    volume_mean = recent_data['volume_usd'].mean()
+    
+    # Verificar crescimento dos últimos dias (MA3)
+    last_3_ma = recent_data['volume_ma3'].tail(3).values
+    last_5_ma = recent_data['volume_ma3'].tail(5).values
+    
+    # Verificar se há volumes decrescentes após spike nos últimos dias
+    last_3_volumes = recent_data['volume_usd'].tail(3).values
+    if len(last_3_volumes) >= 3:
+        # Se tiver um spike seguido de volumes decrescentes, rejeita
+        if last_3_volumes[0] > (volume_mean * 2):  # Volume 2x maior que média
+            if last_3_volumes[1] < last_3_volumes[0] and last_3_volumes[2] < last_3_volumes[1]:
+                return False
+    
+    # Padrão Gradual (4+ dias)
+    gradual_pattern = False
+    if len(last_5_ma) >= 4:
+        # Verificar se há 4 dias consecutivos de crescimento
+        for i in range(len(last_5_ma)-3):
+            if all(last_5_ma[j] > last_5_ma[j-1] for j in range(i+1, i+4)):
+                gradual_pattern = True
+                break
+    
+    # Padrão Recente (2-3 dias)
+    recent_pattern = False
+    if len(last_3_ma) >= 2:
+        # Volume crescente nos últimos 2-3 dias
+        volume_growing = all(last_3_ma[i] > last_3_ma[i-1] for i in range(1, len(last_3_ma)))
+        # Volume atual pelo menos 2x a média anterior
+        volume_significant = last_3_ma[-1] > 2 * volume_mean
+        # Preço subindo junto
+        price_up = recent_data['Close'].iloc[-1] > recent_data['Close'].iloc[-2]
         
-        # Calcular volume em dinheiro
-        ticker_data['volume_usd'] = ticker_data['Volume'] * ticker_data['Close']
+        # Verificar se não há queda significativa após crescimento
+        if volume_growing:
+            last_volumes = recent_data['volume_usd'].tail(3).values
+            if len(last_volumes) >= 2:
+                # Se o último volume for significativamente menor que o anterior, rejeita
+                if last_volumes[-1] < last_volumes[-2] * 0.7:  # Queda de mais de 30%
+                    volume_growing = False
         
-        # Últimos 20 dias para análise
-        recent_data = ticker_data.tail(20).copy()
-        volume_mean = recent_data['volume_usd'].mean()
-        
-        # Verificar se há preços decrescentes após spike nos últimos dias
-        last_4_volumes = recent_data['volume_usd'].tail(4).values
-        last_4_prices = recent_data['Close'].tail(4).values
-        
-        if len(last_4_volumes) >= 4 and len(last_4_prices) >= 4:
-            # Se tiver um spike de volume seguido de 3 preços decrescentes, rejeita
-            if last_4_volumes[0] > (volume_mean * 2):  # Volume 2x maior que média
-                if (last_4_prices[1] < last_4_prices[0] and 
-                    last_4_prices[2] < last_4_prices[1] and 
-                    last_4_prices[3] < last_4_prices[2]):  # 3 dias consecutivos de queda de preço
-                    if ticker == 'QS':
-                        print(f"❌ QS: Rejeitado por preços decrescentes por 3 dias após spike")
-                        print(f"Preços: {[f'${p:.2f}' for p in last_4_prices]}")
-                    return False
-        return True
-    except Exception as e:
-        return True
+        recent_pattern = volume_growing and volume_significant and price_up
+    
+    return gradual_pattern or recent_pattern
 
 def analyze_ticker(ticker_data):
     """Analisa um ticker para padrões de volume"""
@@ -133,7 +156,7 @@ def analyze_ticker(ticker_data):
             print(f"Volume ratio: {volume_ratio:.1f}x")
         
         # Nova verificação de padrão de volume
-        if volume_ratio >= 1.5 and detect_price_pattern(ticker_data):  # Shark detectado
+        if volume_ratio >= 1.5 and detect_volume_pattern(ticker_data):  # Shark detectado
             if ticker == 'QS':
                 print(f"✅ QS: Passou em todos os filtros!")
             # Score baseado em volume e preço
