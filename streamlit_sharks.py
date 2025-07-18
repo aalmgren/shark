@@ -29,8 +29,10 @@ def main():
     )
     
     st.sidebar.markdown("---")
+    st.sidebar.subheader("⚙️ Analysis Parameters")
+    st.sidebar.caption("These affect HOW sharks are detected")
     
-    # Parâmetros de filtro
+    # Parâmetros de análise
     min_volume_usd = st.sidebar.slider(
         "Min daily volume (USD)",
         min_value=1_000_000,
@@ -256,35 +258,33 @@ def display_results(sharks_df, silent_sharks_df):
         silent_count = len(silent_sharks_df) if silent_sharks_df is not None else 0
         st.metric("🤫 Silent Sharks", silent_count)
     
-    # Filtros para os resultados (só aparecem quando há dados)
-    st.subheader("🎛️ Filter Results")
+    # Filtros de visualização (só aparecem quando há dados)
+    st.subheader("🔍 Display Filters")
+    st.caption("Filter the results below (does not re-run analysis)")
+    
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        show_silent_only = st.checkbox("🤫 Only Silent Sharks", help="Show only stocks with low price movement")
+        show_silent_only = st.checkbox("🤫 Only Silent Sharks", help="Show only stocks with price change ≤ 5%")
     
     with col2:
-        min_volume_ratio = st.slider("Min Volume Ratio", 1.0, 10.0, 1.0, 0.1, format="%.1fx")
+        display_min_ratio = st.slider("Display Min Ratio", 1.0, 10.0, 1.0, 0.1, format="%.1fx", help="Hide sharks below this ratio")
     
     with col3:
-        max_price_change = st.slider("Max Price Change (%)", 0.0, 100.0, 100.0, 1.0, format="%.0f%%")
+        display_max_change = st.slider("Display Max Change", 0.0, 100.0, 100.0, 1.0, format="%.0f%%", help="Hide sharks above this change")
     
-    # Aplicar filtros (debug info)
-    st.write(f"📊 Starting with {len(sharks_df)} sharks")
+    # Aplicar filtros de visualização
     filtered_df = sharks_df.copy()
     
-    # Filtrar por volume ratio
-    filtered_df = filtered_df[filtered_df['ratio'] >= min_volume_ratio]
-    st.write(f"📊 After volume ratio filter: {len(filtered_df)} sharks")
+    # Filtrar por volume ratio mínimo para display
+    filtered_df = filtered_df[filtered_df['ratio'] >= display_min_ratio]
     
-    # Filtrar por mudança de preço máxima
-    filtered_df = filtered_df[filtered_df['change_7d'] <= max_price_change]
-    st.write(f"📊 After price change filter: {len(filtered_df)} sharks")
+    # Filtrar por mudança de preço máxima para display
+    filtered_df = filtered_df[filtered_df['change_7d'] <= display_max_change]
     
     # Filtrar apenas silent sharks se marcado
     if show_silent_only:
         filtered_df = filtered_df[filtered_df['change_7d'] <= 5.0]
-        st.write(f"📊 After silent sharks filter: {len(filtered_df)} sharks")
     
     # Tabela de sharks filtrados
     st.subheader(f"🦈 Sharks Found ({len(filtered_df)} results)")
