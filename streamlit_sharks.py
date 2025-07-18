@@ -63,26 +63,6 @@ def main():
         help="Volume multiplier to detect spikes for pattern analysis"
     )
     
-    min_price_90d = st.sidebar.slider(
-        "Min average price (90d)",
-        min_value=1.0,
-        max_value=20.0,
-        value=5.0,
-        step=0.5,
-        format="$%.1f",
-        help="Minimum 90-day average price"
-    )
-    
-    min_current_price = st.sidebar.slider(
-        "Min current price",
-        min_value=1.0,
-        max_value=50.0,
-        value=10.0,
-        step=1.0,
-        format="$%.0f",
-        help="Minimum current price"
-    )
-    
     silent_sharks_threshold = st.sidebar.slider(
         "Silent sharks threshold",
         min_value=0.0,
@@ -91,12 +71,6 @@ def main():
         step=0.5,
         format="%.1f%%",
         help="Maximum 7-day change for silent sharks category"
-    )
-    
-    filter_derivatives = st.sidebar.checkbox(
-        "Filter derivatives (W, U, R, P, etc.)",
-        value=True,
-        help="Exclude warrants, units, rights, and preferred shares"
     )
     
     enable_pattern_detection = st.sidebar.checkbox(
@@ -115,10 +89,7 @@ def main():
             min_volume_usd=min_volume_usd,
             volume_ratio_min=volume_ratio_min,
             spike_multiplier=spike_multiplier,
-            min_price_90d=min_price_90d,
-            min_current_price=min_current_price,
             silent_sharks_threshold=silent_sharks_threshold,
-            filter_derivatives=filter_derivatives,
             enable_pattern_detection=enable_pattern_detection
         )
     else:
@@ -172,9 +143,8 @@ def check_data_availability():
             return True
     return False
 
-def run_analysis(min_volume_usd, volume_ratio_min, spike_multiplier, min_price_90d, 
-                min_current_price, silent_sharks_threshold,
-                filter_derivatives, enable_pattern_detection):
+def run_analysis(min_volume_usd, volume_ratio_min, spike_multiplier,
+                silent_sharks_threshold, enable_pattern_detection):
     """Run shark analysis with custom parameters"""
     
     st.info("🔍 Starting shark analysis...")
@@ -184,12 +154,12 @@ def run_analysis(min_volume_usd, volume_ratio_min, spike_multiplier, min_price_9
         min_volume_usd=min_volume_usd,
         volume_ratio_min=volume_ratio_min,
         spike_multiplier=spike_multiplier,
-        min_price_90d=min_price_90d,
-        min_current_price=min_current_price,
+        min_price_90d=1.0,  # Fixed - now handled in display filters
+        min_current_price=1.0,  # Fixed - now handled in display filters
         allow_negative_performance=False,
         silent_sharks_threshold=silent_sharks_threshold,
         min_data_days=90,
-        filter_derivatives=filter_derivatives,
+        filter_derivatives=False,  # Fixed - now handled in display filters
         enable_pattern_detection=enable_pattern_detection
     )
     
@@ -262,25 +232,39 @@ def display_results(sharks_df, silent_sharks_df):
     st.subheader("🔍 Display Filters")
     st.caption("Filter the results below (does not re-run analysis)")
     
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
         show_silent_only = st.checkbox("🤫 Only Silent Sharks", help="Show only stocks with price change ≤ 5%")
     
     with col2:
-        display_min_ratio = st.slider("Display Min Ratio", 1.0, 10.0, 1.0, 0.1, format="%.1fx", help="Hide sharks below this ratio")
+        display_min_ratio = st.slider("Min Ratio", 1.0, 10.0, 1.0, 0.1, format="%.1fx", help="Hide sharks below this ratio")
     
     with col3:
-        display_max_change = st.slider("Display Max Change", 0.0, 100.0, 100.0, 1.0, format="%.0f%%", help="Hide sharks above this change")
+        display_max_change = st.slider("Max Change", 0.0, 100.0, 100.0, 1.0, format="%.0f%%", help="Hide sharks above this change")
+    
+    with col4:
+        display_min_price = st.slider("Min Price", 1.0, 50.0, 1.0, 1.0, format="$%.0f", help="Hide stocks below this price")
+    
+    with col5:
+        hide_derivatives = st.checkbox("Hide Derivatives", value=False, help="Hide warrants, units, rights, etc.")
     
     # Aplicar filtros de visualização
     filtered_df = sharks_df.copy()
     
-    # Filtrar por volume ratio mínimo para display
+    # Filtrar por volume ratio mínimo
     filtered_df = filtered_df[filtered_df['ratio'] >= display_min_ratio]
     
-    # Filtrar por mudança de preço máxima para display
+    # Filtrar por mudança de preço máxima
     filtered_df = filtered_df[filtered_df['change_7d'] <= display_max_change]
+    
+    # Filtrar por preço mínimo
+    filtered_df = filtered_df[filtered_df['price'] >= display_min_price]
+    
+    # Filtrar derivatives se marcado
+    if hide_derivatives:
+        # Filtrar tickers que terminam com sufixos de derivatives
+        filtered_df = filtered_df[~filtered_df['ticker'].str.endswith(('W', 'WS', 'U', 'R', 'P', 'PR', 'X', 'L', 'Z'))]
     
     # Filtrar apenas silent sharks se marcado
     if show_silent_only:
@@ -341,8 +325,6 @@ def show_instructions():
     """Show initial instructions"""
     st.markdown("""
     **How to use:** Download data → Adjust filters (optional) → Run analysis
-    
-    **Sharks:** 🔥 Mega (3x+) | ⚡ Big (2-3x) | 🦈 Regular (1.5-2x) | 🤫 Silent (stable price)
     
     Click **Run Analysis** to start! 🏊‍♂️
     """)
