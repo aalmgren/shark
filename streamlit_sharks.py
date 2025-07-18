@@ -27,7 +27,7 @@ def main():
         st.sidebar.warning("⚠️ No data found")
     
     # Botão de download
-    if st.sidebar.button("📥 Download Today's Data"):
+    if st.sidebar.button("📥 Download Today's Data", disabled=True):
         download_data()
     
     # Botão de análise
