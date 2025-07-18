@@ -5,8 +5,6 @@ import os
 import subprocess
 import sys
 from datetime import datetime
-import plotly.express as px
-import plotly.graph_objects as go
 from shark_analyzer import SharkAnalyzer
 
 # Configuração da página
@@ -258,69 +256,43 @@ def display_results(sharks_df, silent_sharks_df):
         silent_count = len(silent_sharks_df) if silent_sharks_df is not None else 0
         st.metric("🤫 Silent Sharks", silent_count)
     
-    # Charts
-    col1, col2 = st.columns(2)
+    # Filtros para os resultados
+    col1, col2, col3 = st.columns(3)
     
     with col1:
-        # Volume ratio distribution
-        fig_ratio = px.histogram(
-            sharks_df, 
-            x='ratio', 
-            nbins=20,
-            title="Volume Ratio Distribution",
-            labels={'ratio': 'Volume Ratio (x)', 'count': 'Number of Stocks'}
-        )
-        st.plotly_chart(fig_ratio, use_container_width=True)
+        show_silent_only = st.checkbox("🤫 Only Silent Sharks", help="Show only stocks with low price movement")
     
     with col2:
-        # Price change vs volume ratio scatter
-        fig_scatter = px.scatter(
-            sharks_df,
-            x='ratio',
-            y='change_7d',
-            size='volume_usd_7d',
-            hover_data=['ticker', 'price'],
-            title="Volume Ratio vs Price Change",
-            labels={'ratio': 'Volume Ratio (x)', 'change_7d': '7-Day Change (%)'}
-        )
-        st.plotly_chart(fig_scatter, use_container_width=True)
+        min_volume_ratio = st.slider("Min Volume Ratio", 1.5, 10.0, 1.5, 0.1, format="%.1fx")
     
-    # Top sharks table
-    st.subheader("🏆 Top 20 Sharks")
+    with col3:
+        max_price_change = st.slider("Max Price Change (%)", 0.0, 50.0, 50.0, 1.0, format="%.0f%%")
     
-    # Format the dataframe for display
-    display_df = sharks_df.head(20).copy()
-    display_df['volume_usd_7d_M'] = display_df['volume_usd_7d'] / 1_000_000
-    display_df['volume_usd_90d_M'] = display_df['volume_usd_90d'] / 1_000_000
+    # Aplicar filtros
+    filtered_df = sharks_df.copy()
     
-    st.dataframe(
-        display_df[['ticker', 'ratio', 'volume_usd_7d_M', 'volume_usd_90d_M', 
-                   'price', 'price_90d_avg', 'change_7d', 'change_30d', 'score']].round(2),
-        column_config={
-            'ticker': 'Ticker',
-            'ratio': st.column_config.NumberColumn('Volume Ratio', format="%.1fx"),
-            'volume_usd_7d_M': st.column_config.NumberColumn('Vol 7D ($M)', format="$%.1fM"),
-            'volume_usd_90d_M': st.column_config.NumberColumn('Vol 90D ($M)', format="$%.1fM"),
-            'price': st.column_config.NumberColumn('Current Price', format="$%.2f"),
-            'price_90d_avg': st.column_config.NumberColumn('Avg Price 90D', format="$%.2f"),
-            'change_7d': st.column_config.NumberColumn('7D Change', format="%.1f%%"),
-            'change_30d': st.column_config.NumberColumn('30D Change', format="%.1f%%"),
-            'score': st.column_config.NumberColumn('Score', format="%.1f")
-        },
-        use_container_width=True
-    )
+    if show_silent_only:
+        filtered_df = filtered_df[filtered_df['change_7d'] <= silent_sharks_threshold]
     
-    # Silent sharks table
-    if silent_sharks_df is not None and len(silent_sharks_df) > 0:
-        st.subheader("🤫 Silent Sharks")
-        
-        silent_display_df = silent_sharks_df.copy()
-        silent_display_df['volume_usd_7d_M'] = silent_display_df['volume_usd_7d'] / 1_000_000
-        silent_display_df['volume_usd_90d_M'] = silent_display_df['volume_usd_90d'] / 1_000_000
+    filtered_df = filtered_df[
+        (filtered_df['ratio'] >= min_volume_ratio) & 
+        (filtered_df['change_7d'] <= max_price_change)
+    ]
+    
+    # Tabela de sharks filtrados
+    st.subheader(f"🦈 Sharks Found ({len(filtered_df)} results)")
+    
+    if len(filtered_df) == 0:
+        st.warning("No sharks match the current filters. Try adjusting the criteria.")
+    else:
+        # Format the dataframe for display
+        display_df = filtered_df.copy()
+        display_df['volume_usd_7d_M'] = display_df['volume_usd_7d'] / 1_000_000
+        display_df['volume_usd_90d_M'] = display_df['volume_usd_90d'] / 1_000_000
         
         st.dataframe(
-            silent_display_df[['ticker', 'ratio', 'volume_usd_7d_M', 'volume_usd_90d_M', 
-                              'price', 'price_90d_avg', 'change_7d', 'change_30d', 'score']].round(2),
+            display_df[['ticker', 'ratio', 'volume_usd_7d_M', 'volume_usd_90d_M', 
+                       'price', 'price_90d_avg', 'change_7d', 'change_30d', 'score']].round(2),
             column_config={
                 'ticker': 'Ticker',
                 'ratio': st.column_config.NumberColumn('Volume Ratio', format="%.1fx"),
@@ -332,31 +304,31 @@ def display_results(sharks_df, silent_sharks_df):
                 'change_30d': st.column_config.NumberColumn('30D Change', format="%.1f%%"),
                 'score': st.column_config.NumberColumn('Score', format="%.1f")
             },
-            use_container_width=True
+            use_container_width=True,
+            height=600
         )
     
     # Download buttons
-    st.markdown("---")
     col1, col2 = st.columns(2)
     
     with col1:
-        csv_data = sharks_df.to_csv(index=False)
-        st.download_button(
-            label="📥 Download All Sharks CSV",
-            data=csv_data,
-            file_name=f"sharks_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-            mime="text/csv"
-        )
-    
-    with col2:
-        if silent_sharks_df is not None and len(silent_sharks_df) > 0:
-            silent_csv_data = silent_sharks_df.to_csv(index=False)
+        if len(filtered_df) > 0:
+            csv_data = filtered_df.to_csv(index=False)
             st.download_button(
-                label="📥 Download Silent Sharks CSV",
-                data=silent_csv_data,
-                file_name=f"silent_sharks_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                label="📥 Download Filtered Results",
+                data=csv_data,
+                file_name=f"sharks_filtered_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
                 mime="text/csv"
             )
+    
+    with col2:
+        csv_data_all = sharks_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download All Sharks",
+            data=csv_data_all,
+            file_name=f"sharks_all_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+            mime="text/csv"
+        )
 
 def show_instructions():
     """Show initial instructions"""
