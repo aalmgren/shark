@@ -99,15 +99,6 @@ def main():
         help="Maximum 7-day change for silent sharks category"
     )
     
-    min_data_days = st.sidebar.slider(
-        "Min data days",
-        min_value=30,
-        max_value=180,
-        value=90,
-        step=10,
-        help="Minimum number of days of historical data required"
-    )
-    
     filter_derivatives = st.sidebar.checkbox(
         "Filter derivatives (W, U, R, P, etc.)",
         value=True,
@@ -134,7 +125,7 @@ def main():
             min_current_price=min_current_price,
             allow_negative_performance=allow_negative_performance,
             silent_sharks_threshold=silent_sharks_threshold,
-            min_data_days=min_data_days,
+            min_data_days=90,
             filter_derivatives=filter_derivatives,
             enable_pattern_detection=enable_pattern_detection
         )
@@ -191,7 +182,7 @@ def check_data_availability():
 
 def run_analysis(min_volume_usd, volume_ratio_min, spike_multiplier, min_price_90d, 
                 min_current_price, allow_negative_performance, silent_sharks_threshold,
-                min_data_days, filter_derivatives, enable_pattern_detection):
+                filter_derivatives, enable_pattern_detection):
     """Run shark analysis with custom parameters"""
     
     st.info("🔍 Starting shark analysis...")
@@ -205,7 +196,7 @@ def run_analysis(min_volume_usd, volume_ratio_min, spike_multiplier, min_price_9
         min_current_price=min_current_price,
         allow_negative_performance=allow_negative_performance,
         silent_sharks_threshold=silent_sharks_threshold,
-        min_data_days=min_data_days,
+        min_data_days=90,
         filter_derivatives=filter_derivatives,
         enable_pattern_detection=enable_pattern_detection
     )
