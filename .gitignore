@@ -1,5 +1,4 @@
-# Data directories
-nasdaq_database/
+# Data directories (keep nasdaq_database, exclude additional_database)
 additional_database/
 
 # Python cache
