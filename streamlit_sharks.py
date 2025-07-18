@@ -83,12 +83,6 @@ def main():
         help="Minimum current price"
     )
     
-    allow_negative_performance = st.sidebar.checkbox(
-        "Allow negative performance",
-        value=False,
-        help="Include stocks with negative 7d or 30d performance"
-    )
-    
     silent_sharks_threshold = st.sidebar.slider(
         "Silent sharks threshold",
         min_value=0.0,
@@ -123,9 +117,7 @@ def main():
             spike_multiplier=spike_multiplier,
             min_price_90d=min_price_90d,
             min_current_price=min_current_price,
-            allow_negative_performance=allow_negative_performance,
             silent_sharks_threshold=silent_sharks_threshold,
-            min_data_days=90,
             filter_derivatives=filter_derivatives,
             enable_pattern_detection=enable_pattern_detection
         )
@@ -181,7 +173,7 @@ def check_data_availability():
     return False
 
 def run_analysis(min_volume_usd, volume_ratio_min, spike_multiplier, min_price_90d, 
-                min_current_price, allow_negative_performance, silent_sharks_threshold,
+                min_current_price, silent_sharks_threshold,
                 filter_derivatives, enable_pattern_detection):
     """Run shark analysis with custom parameters"""
     
@@ -194,7 +186,7 @@ def run_analysis(min_volume_usd, volume_ratio_min, spike_multiplier, min_price_9
         spike_multiplier=spike_multiplier,
         min_price_90d=min_price_90d,
         min_current_price=min_current_price,
-        allow_negative_performance=allow_negative_performance,
+        allow_negative_performance=False,
         silent_sharks_threshold=silent_sharks_threshold,
         min_data_days=90,
         filter_derivatives=filter_derivatives,
