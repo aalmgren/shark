@@ -39,93 +39,92 @@ def main():
     st.sidebar.markdown("---")
     
     # Parâmetros de filtro
-    with st.sidebar.expander("⚙️ Filters", expanded=False):
-        min_volume_usd = st.sidebar.slider(
-            "Min daily volume (USD)",
-            min_value=1_000_000,
-            max_value=50_000_000,
-            value=10_000_000,
-            step=1_000_000,
-            format="$%dM",
-            help="Minimum average daily volume in USD over 90 days"
-        ) 
-        
-        volume_ratio_min = st.sidebar.slider(
-            "Volume spike ratio",
-            min_value=1.0,
-            max_value=5.0,
-            value=1.5,
-            step=0.1,
-            format="%.1fx",
-            help="Minimum ratio of 7-day vs 90-day average volume"
-        )
-        
-        spike_multiplier = st.sidebar.slider(
-            "Spike detection multiplier",
-            min_value=1.5,
-            max_value=4.0,
-            value=2.0,
-            step=0.1,
-            format="%.1fx",
-            help="Volume multiplier to detect spikes for pattern analysis"
-        )
-        
-        min_price_90d = st.sidebar.slider(
-            "Min average price (90d)",
-            min_value=1.0,
-            max_value=20.0,
-            value=5.0,
-            step=0.5,
-            format="$%.1f",
-            help="Minimum 90-day average price"
-        )
-        
-        min_current_price = st.sidebar.slider(
-            "Min current price",
-            min_value=1.0,
-            max_value=50.0,
-            value=10.0,
-            step=1.0,
-            format="$%.0f",
-            help="Minimum current price"
-        )
-        
-        allow_negative_performance = st.sidebar.checkbox(
-            "Allow negative performance",
-            value=False,
-            help="Include stocks with negative 7d or 30d performance"
-        )
-        
-        silent_sharks_threshold = st.sidebar.slider(
-            "Silent sharks threshold",
-            min_value=0.0,
-            max_value=15.0,
-            value=5.0,
-            step=0.5,
-            format="%.1f%%",
-            help="Maximum 7-day change for silent sharks category"
-        )
-        
-        min_data_days = st.sidebar.slider(
-            "Min data days",
-            min_value=30,
-            max_value=180,
-            value=90,
-            step=10,
-            help="Minimum number of days of historical data required"
-        )
-        
-        filter_derivatives = st.sidebar.checkbox(
-            "Filter derivatives (W, U, R, P, etc.)",
-            value=True,
-            help="Exclude warrants, units, rights, and preferred shares"
-        )
-        
-        enable_pattern_detection = st.sidebar.checkbox(
-            "Enable price pattern detection",
-            value=True,
-            help="Reject stocks with declining prices after volume spikes"
-        )
+    min_volume_usd = st.sidebar.slider(
+        "Min daily volume (USD)",
+        min_value=1_000_000,
+        max_value=50_000_000,
+        value=10_000_000,
+        step=1_000_000,
+        format="$%dM",
+        help="Minimum average daily volume in USD over 90 days"
+    ) 
+    
+    volume_ratio_min = st.sidebar.slider(
+        "Volume spike ratio",
+        min_value=1.0,
+        max_value=5.0,
+        value=1.5,
+        step=0.1,
+        format="%.1fx",
+        help="Minimum ratio of 7-day vs 90-day average volume"
+    )
+    
+    spike_multiplier = st.sidebar.slider(
+        "Spike detection multiplier",
+        min_value=1.5,
+        max_value=4.0,
+        value=2.0,
+        step=0.1,
+        format="%.1fx",
+        help="Volume multiplier to detect spikes for pattern analysis"
+    )
+    
+    min_price_90d = st.sidebar.slider(
+        "Min average price (90d)",
+        min_value=1.0,
+        max_value=20.0,
+        value=5.0,
+        step=0.5,
+        format="$%.1f",
+        help="Minimum 90-day average price"
+    )
+    
+    min_current_price = st.sidebar.slider(
+        "Min current price",
+        min_value=1.0,
+        max_value=50.0,
+        value=10.0,
+        step=1.0,
+        format="$%.0f",
+        help="Minimum current price"
+    )
+    
+    allow_negative_performance = st.sidebar.checkbox(
+        "Allow negative performance",
+        value=False,
+        help="Include stocks with negative 7d or 30d performance"
+    )
+    
+    silent_sharks_threshold = st.sidebar.slider(
+        "Silent sharks threshold",
+        min_value=0.0,
+        max_value=15.0,
+        value=5.0,
+        step=0.5,
+        format="%.1f%%",
+        help="Maximum 7-day change for silent sharks category"
+    )
+    
+    min_data_days = st.sidebar.slider(
+        "Min data days",
+        min_value=30,
+        max_value=180,
+        value=90,
+        step=10,
+        help="Minimum number of days of historical data required"
+    )
+    
+    filter_derivatives = st.sidebar.checkbox(
+        "Filter derivatives (W, U, R, P, etc.)",
+        value=True,
+        help="Exclude warrants, units, rights, and preferred shares"
+    )
+    
+    enable_pattern_detection = st.sidebar.checkbox(
+        "Enable price pattern detection",
+        value=True,
+        help="Reject stocks with declining prices after volume spikes"
+    )
     
     # Main content area
     if analyze_button:
