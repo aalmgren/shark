@@ -1,5 +1,6 @@
 import requests
 import pandas as pd
+import os
 
 def get_nasdaq_tickers():
     """Baixa tickers NASDAQ"""
@@ -25,9 +26,10 @@ def main():
     df = pd.DataFrame(tickers)
     df = df.sort_values('ticker')
     
-    # Salvar
-    df.to_csv('all_tickers.csv', index=False)
-    print(f"✅ Salvos {len(df)} tickers em all_tickers.csv")
+    # Salvar na pasta tick
+    os.makedirs('tick', exist_ok=True)
+    df.to_csv('tick/tickers.csv', index=False)
+    print(f"✅ Salvos {len(df)} tickers em tick/tickers.csv")
 
 if __name__ == "__main__":
     main() 

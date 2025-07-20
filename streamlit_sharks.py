@@ -196,7 +196,7 @@ def download_data():
 
 def check_data_availability():
     """Check if data directories exist and have recent data"""
-    data_dirs = ['nasdaq_database', 'additional_database']
+    data_dirs = ['DB', 'additional_database']
     for data_dir in data_dirs:
         if os.path.exists(data_dir) and os.listdir(data_dir):
             return True
@@ -264,7 +264,7 @@ def run_sharks_analysis_simple(volume_period_long, volume_period_short, volume_r
     
     # 1. Collect files
     all_files = []
-    for data_dir in ['nasdaq_database', 'additional_database']:
+    for data_dir in ['DB', 'additional_database']:
         if os.path.exists(data_dir):
             files = [(os.path.join(data_dir, f), f) for f in os.listdir(data_dir) if f.endswith('.csv')]
             all_files.extend(files)

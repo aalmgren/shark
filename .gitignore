@@ -20,3 +20,6 @@ Thumbs.db
 
 # Streamlit cache
 .streamlit/secrets.toml 
+
+DB/CON.csv
+DB/PRN.csv 
