@@ -5,12 +5,12 @@ import os
 import subprocess
 import sys
 from datetime import datetime
-from analyze_sharks import process_nasdaq_data, analyze_ticker, process_file
+from analyze import process_nasdaq_data, analyze_ticker, process_file
 
 # Configuração da página
 st.set_page_config(
-    page_title="🦈 Shark Detection - IBKR",
-    page_icon="🦈",
+    page_title="⚡ Momentum Analysis - IBKR",
+    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -26,6 +26,17 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+@st.cache_data
+def load_ticker_data():
+    """Carrega e armazena em cache os dados dos tickers com setores e indústrias."""
+    file_path = 'tick/tickers_with_sectors_deduped.csv'
+    if os.path.exists(file_path):
+        column_names = ['sector', 'industry', 'mcap', 'conid', 'name', 'ticker', 'exchange']
+        df = pd.read_csv(file_path, header=None, names=column_names)
+        return df
+    st.sidebar.warning(f"Ticker info file not found at {file_path}")
+    return None
 
 def save_analysis_params(volume_period_long, volume_period_short, volume_ratio_min, silent_sharks_threshold):
     """Salva os parâmetros da análise em arquivo JSON"""
@@ -58,20 +69,20 @@ def load_analysis_params():
         'volume_period_long': 60,
         'volume_period_short': 7,
         'volume_ratio_min': 1.5,
-        'silent_sharks_threshold': 5.0
+        'latent_momentum_threshold': 5.0
     }
 
 def load_saved_results():
     """Carrega os resultados salvos dos arquivos CSV"""
     try:
         # Verificar se os arquivos existem
-        sharks_file = "institutional_accumulation_candidates.csv"
-        silent_sharks_file = "silent_sharks.csv"
+        candidates_file = "momentum_candidates.csv"
+        latent_momentum_file = "latent_momentum_candidates.csv"
         
-        if os.path.exists(sharks_file):
+        if os.path.exists(candidates_file):
             # Obter data de modificação do arquivo
             import time
-            file_time = os.path.getmtime(sharks_file)
+            file_time = os.path.getmtime(candidates_file)
             file_date = datetime.fromtimestamp(file_time).strftime('%Y-%m-%d %H:%M')
             
             # Carregar parâmetros da última análise
@@ -82,16 +93,16 @@ def load_saved_results():
             st.sidebar.markdown(f"📅 **Last Analysis:** {file_date}")
             st.sidebar.markdown(f"⚙️ **Parameters:** {params['volume_period_short']}D / {params['volume_period_long']}D")
             
-            sharks_df = pd.read_csv(sharks_file)
-            silent_sharks_df = None
+            momentum_df = pd.read_csv(candidates_file)
+            latent_momentum_df = None
             
-            if os.path.exists(silent_sharks_file):
-                silent_sharks_df = pd.read_csv(silent_sharks_file)
+            if os.path.exists(latent_momentum_file):
+                latent_momentum_df = pd.read_csv(latent_momentum_file)
             else:
-                # Criar silent sharks a partir dos dados principais
-                silent_sharks_df = sharks_df[sharks_df['change_7d'] <= params['silent_sharks_threshold']]
+                # Criar latent momentum a partir dos dados principais
+                latent_momentum_df = momentum_df[momentum_df['change_7d'] <= params.get('latent_momentum_threshold', 5.0)]
             
-            return sharks_df, silent_sharks_df, params
+            return momentum_df, latent_momentum_df, params
         
     except Exception as e:
         st.error(f"❌ Erro ao carregar dados salvos: {str(e)}")
@@ -99,7 +110,6 @@ def load_saved_results():
     return None, None, None
 
 def main():
-    st.title("🦈 SHARK DETECTION")
     
     # Botão de download
     if st.sidebar.button("📥 Download Today's Data", disabled=True):
@@ -107,7 +117,7 @@ def main():
     
     # Botão de análise
     analyze_button = st.sidebar.button(
-        "🔍 Run Shark Analysis",
+        "🔍 Run Momentum Analysis",
         type="primary"
     )
     
@@ -148,9 +158,9 @@ def main():
         )
     else:
         # Carregar automaticamente os dados salvos quando a página abre
-        sharks_df, silent_sharks_df, params = load_saved_results()
-        if sharks_df is not None:
-            display_results(sharks_df, silent_sharks_df, params, is_saved_data=True)
+        momentum_df, latent_momentum_df, params = load_saved_results()
+        if momentum_df is not None:
+            display_results(momentum_df, latent_momentum_df, params, is_saved_data=True)
         else:
             show_instructions()
 
@@ -203,16 +213,16 @@ def check_data_availability():
     return False
 
 def run_analysis(volume_period_long, volume_period_short):
-    """Run shark analysis using analyze_sharks.py functions"""
+    """Run momentum analysis using analyze.py functions"""
     
     # Fixed values for hidden parameters
     volume_ratio_min = 1.5
-    silent_sharks_threshold = 5.0
+    latent_momentum_threshold = 5.0
     
     # Save analysis parameters
-    save_analysis_params(volume_period_long, volume_period_short, volume_ratio_min, silent_sharks_threshold)
+    save_analysis_params(volume_period_long, volume_period_short, volume_ratio_min, latent_momentum_threshold)
     
-    st.info("🔍 Starting shark analysis...")
+    st.info("🔍 Starting momentum analysis...")
     
     # Progress tracking
     progress_bar = st.progress(0)
@@ -233,13 +243,13 @@ def run_analysis(volume_period_long, volume_period_short):
             )
         
         # Call the process_nasdaq_data function directly
-        log_message("🦈 DETECTANDO SMART MONEY - NADAR COM OS SHARKS")
+        log_message("⚡ DETECTING MOMENTUM - FINDING HIGH-MOMENTUM STOCKS")
         progress_bar.progress(0.1)
         status_text.text("Loading data files...")
         
         # Execute analysis (simplified version without the class)
-        sharks_df, silent_sharks_df = run_sharks_analysis_simple(
-            volume_period_long, volume_period_short, volume_ratio_min, silent_sharks_threshold,
+        momentum_df, latent_momentum_df = run_momentum_analysis_simple(
+            volume_period_long, volume_period_short, volume_ratio_min, latent_momentum_threshold,
             log_message, progress_bar, status_text
         )
     
@@ -251,15 +261,15 @@ def run_analysis(volume_period_long, volume_period_short):
         'volume_period_long': volume_period_long,
         'volume_period_short': volume_period_short,
         'volume_ratio_min': volume_ratio_min,
-        'silent_sharks_threshold': silent_sharks_threshold
+        'latent_momentum_threshold': latent_momentum_threshold
     }
     
     # Display results
-    display_results(sharks_df, silent_sharks_df, params)
+    display_results(momentum_df, latent_momentum_df, params)
 
-def run_sharks_analysis_simple(volume_period_long, volume_period_short, volume_ratio_min, silent_sharks_threshold, 
+def run_momentum_analysis_simple(volume_period_long, volume_period_short, volume_ratio_min, latent_momentum_threshold, 
                               log_func, progress_bar, status_text):
-    """Simplified version of shark analysis for Streamlit"""
+    """Simplified version of momentum analysis for Streamlit"""
     import multiprocessing as mp
     
     # 1. Collect files
@@ -297,7 +307,7 @@ def run_sharks_analysis_simple(volume_period_long, volume_period_short, volume_r
     progress_bar.progress(0.6)
     
     # 4. Analyze each ticker
-    status_text.text("Analyzing tickers for shark patterns...")
+    status_text.text("Analyzing tickers for momentum patterns...")
     ticker_groups = [group for _, group in df.groupby('ticker')]
     analyzed = []
     
@@ -311,21 +321,44 @@ def run_sharks_analysis_simple(volume_period_long, volume_period_short, volume_r
             progress_bar.progress(progress)
     
     if not analyzed:
-        log_func("❌ No sharks detected")
+        log_func("❌ No momentum candidates detected")
         return None, None
     
-    # 5. Create results
+    # 5. Create results DataFrame
     progress_bar.progress(0.95)
-    sharks_df = pd.DataFrame(analyzed)
-    sharks_df = sharks_df.sort_values('score', ascending=False)
+    status_text.text("Finalizing results...")
+    momentum_df = pd.DataFrame(analyzed)
     
-    # Create silent sharks
-    silent_sharks_df = sharks_df[sharks_df['change_7d'] <= silent_sharks_threshold]
+    # 6. Enrich with Sector and Industry info
+    log_func("Enriching data with sector/industry information...")
+    ticker_data = load_ticker_data()
+    if ticker_data is not None:
+        # Clean merge keys for robustness
+        momentum_df['ticker'] = momentum_df['ticker'].astype(str).str.strip()
+        ticker_data['ticker'] = ticker_data['ticker'].astype(str).str.strip()
+        
+        momentum_df = pd.merge(momentum_df, ticker_data[['ticker', 'sector', 'industry']], on='ticker', how='left')
+        momentum_df['sector'].fillna('Unknown', inplace=True)
+        momentum_df['industry'].fillna('Unknown', inplace=True)
+    else:
+        log_func("⚠️ Ticker info file not found. Sector/Industry will be 'Unknown'.")
+        momentum_df['sector'] = 'Unknown'
+        momentum_df['industry'] = 'Unknown'
+
+    momentum_df = momentum_df.sort_values('score', ascending=False)
     
-    log_func(f"🦈 {len(sharks_df)} sharks detected!")
-    log_func(f"🤫 {len(silent_sharks_df)} silent sharks detected!")
+    # 7. Save results to disk
+    log_func(f"💾 Saving {len(momentum_df)} results to disk...")
+    momentum_df.to_csv('momentum_candidates.csv', index=False)
     
-    return sharks_df, silent_sharks_df
+    # Create and save latent momentum
+    latent_momentum_df = momentum_df[momentum_df['change_7d'] <= latent_momentum_threshold]
+    latent_momentum_df.to_csv('latent_momentum_candidates.csv', index=False)
+    
+    log_func(f"⚡ {len(momentum_df)} momentum candidates detected!")
+    log_func(f"🤫 {len(latent_momentum_df)} latent momentum candidates detected!")
+    
+    return momentum_df, latent_momentum_df
 
 def analyze_ticker_simple(ticker_data, volume_period_long, volume_period_short, volume_ratio_min):
     """Simplified ticker analysis for Streamlit"""
@@ -357,8 +390,8 @@ def analyze_ticker_simple(ticker_data, volume_period_long, volume_period_short, 
         volume_short = last_short['Volume'].mean()
         price_long_avg = ticker_data['Close'].tail(volume_period_long).mean() if volume_period_long > 0 else ticker_data['Close'].mean()
         
-        # Apply basic filters - use fixed minimum volume filter of $10M for simplicity
-        if volume_usd_long < 10_000_000:
+        # Apply basic filters - Reduced volume filter for more flexibility
+        if volume_usd_long < 1_000_000:
             return None
             
         if price_long_avg <= 1.0:  # Very basic price filter
@@ -380,8 +413,8 @@ def analyze_ticker_simple(ticker_data, volume_period_long, volume_period_short, 
         price_change_short = ((current_price - price_short_ago) / price_short_ago) * 100 if price_short_ago > 0 else 0
         price_change_30d = ((current_price - price_30d_ago) / price_30d_ago) * 100 if price_30d_ago > 0 else 0
         
-        # Filter negative performance
-        if price_change_short <= 0 or price_change_30d <= 0:
+        # Filter negative performance on the short period only for more flexibility
+        if price_change_short <= 0:
             return None
         
         # Volume ratio calculation
@@ -408,52 +441,90 @@ def analyze_ticker_simple(ticker_data, volume_period_long, volume_period_short, 
         pass
     return None
 
-def display_results(sharks_df, silent_sharks_df, params, is_saved_data=False):
+def display_results(momentum_df, latent_momentum_df, params, is_saved_data=False):
     """Display analysis results with tables and charts"""
     
-    
-    if sharks_df is None or len(sharks_df) == 0:
-        st.warning("🦈 No sharks detected with current parameters. Try adjusting the filters.")
+    if momentum_df is None or len(momentum_df) == 0:
+        st.warning("⚡ No momentum candidates detected with current parameters. Try adjusting the filters.")
         return
+
+    # Garante que os dados de setor/indústria existam, carregando-os se necessário.
+    if 'sector' not in momentum_df.columns or 'industry' not in momentum_df.columns:
+        ticker_data = load_ticker_data()
+        if ticker_data is not None:
+            # Clean merge keys for robustness
+            momentum_df['ticker'] = momentum_df['ticker'].astype(str).str.strip()
+            ticker_data['ticker'] = ticker_data['ticker'].astype(str).str.strip()
+
+            momentum_df = pd.merge(momentum_df, ticker_data[['ticker', 'sector', 'industry']], on='ticker', how='left')
+            momentum_df['industry'].fillna('Unknown', inplace=True)
+            momentum_df['sector'].fillna('Unknown', inplace=True)
+        else:
+            momentum_df['industry'] = 'Unknown'
+            momentum_df['sector'] = 'Unknown'
     
-    # Summary metrics
-    col1, col2, col3, col4 = st.columns(4)
+    st.markdown("---")
     
-    with col1:
-        st.metric("🦈 Total Sharks", len(sharks_df))
+    # --- Linha de Filtros 1 ---
+    filter_col1, filter_col2, filter_col3 = st.columns(3)
     
-    with col2:
-        mega_sharks = len(sharks_df[sharks_df['ratio'] >= 3])
-        st.metric("🔥 Mega Sharks (3x+)", mega_sharks)
+    with filter_col1:
+        display_min_ratio = st.slider("Min Ratio", 1.0, 10.0, 1.0, 0.1, format="%.1fx", help="Hide candidates below this ratio")
     
-    with col3:
-        big_sharks = len(sharks_df[(sharks_df['ratio'] >= 2) & (sharks_df['ratio'] < 3)])
-        st.metric("⚡ Big Sharks (2-3x)", big_sharks)
+    with filter_col2:
+        display_min_volume = st.slider("Min Volume", 0, 1000, 80, 10, format="$%dM", help="Hide candidates below this daily volume (millions USD)")
     
-    with col4:
-        silent_count = len(silent_sharks_df) if silent_sharks_df is not None else 0
-        st.metric("🤫 Silent Sharks", silent_count)
-    
-    col1, col2, col3, col4, col5 = st.columns(5)
-    
-    with col1:
-        show_silent_only = st.checkbox("🤫 Only Silent Sharks", help="Show only stocks with price change ≤ 5%")
-    
-    with col2:
-        display_min_ratio = st.slider("Min Ratio", 1.0, 10.0, 1.0, 0.1, format="%.1fx", help="Hide sharks below this ratio")
-    
-    with col3:
-        display_min_volume = st.slider("Min Volume", 0, 1000, 80, 10, format="$%dM", help="Hide sharks below this daily volume (millions USD)")
-    
-    with col4:
+    with filter_col3:
         display_min_price = st.slider("Min Price", 1.0, 50.0, 10.0, 1.0, format="$%.0f", help="Hide stocks below this price")
+
+    # --- Linha de Filtros 2 (Sector & Industry) ---
+    filter_col_sector, filter_col_industry = st.columns(2)
+
+    with filter_col_sector:
+        if 'sector' in momentum_df.columns:
+            all_sectors = sorted(momentum_df['sector'].dropna().unique())
+            if len(all_sectors) > 1:
+                selected_sectors = st.multiselect("Filter by Sector", options=all_sectors, help="Select one or more sectors to display")
+            else:
+                selected_sectors = []
+        else:
+            selected_sectors = []
+
+    with filter_col_industry:
+        if 'industry' in momentum_df.columns:
+            # Filtra as indústrias com base nos setores selecionados
+            if selected_sectors:
+                available_industries = sorted(momentum_df[momentum_df['sector'].isin(selected_sectors)]['industry'].dropna().unique())
+            else:
+                available_industries = sorted(momentum_df['industry'].dropna().unique())
+            
+            if len(available_industries) > 1:
+                selected_industries = st.multiselect("Filter by Industry", options=available_industries, help="Select one or more industries to display")
+            else:
+                selected_industries = []
+        else:
+            selected_industries = []
     
-    with col5:
+    # --- Linha de Filtros 3 ---
+    filter_col_options1, filter_col_options2 = st.columns(2)
+
+    with filter_col_options1:
+        show_latent_only = st.checkbox("🤫 Only Latent Momentum", help="Show only stocks with price change ≤ 5%")
+
+    with filter_col_options2:
         hide_derivatives = st.checkbox("Hide Derivatives", value=True, help="Hide warrants, units, rights, etc.")
     
     # Aplicar filtros de visualização
-    filtered_df = sharks_df.copy()
+    filtered_df = momentum_df.copy()
     
+    # Filtrar por setor
+    if selected_sectors:
+        filtered_df = filtered_df[filtered_df['sector'].isin(selected_sectors)]
+        
+    # Filtrar por indústria
+    if selected_industries:
+        filtered_df = filtered_df[filtered_df['industry'].isin(selected_industries)]
+
     # Filtrar por volume ratio mínimo
     filtered_df = filtered_df[filtered_df['ratio'] >= display_min_ratio]
     
@@ -468,15 +539,15 @@ def display_results(sharks_df, silent_sharks_df, params, is_saved_data=False):
     if hide_derivatives:
         filtered_df = filtered_df[~filtered_df['ticker'].str.endswith(('W', 'WS', 'U', 'R', 'P', 'PR', 'X', 'L', 'Z'))]
     
-    # Filtrar apenas silent sharks se marcado
-    if show_silent_only:
+    # Filtrar apenas latent momentum se marcado
+    if show_latent_only:
         filtered_df = filtered_df[filtered_df['change_7d'] <= 5.0]
     
-    # Tabela de sharks filtrados
-    st.subheader(f"🦈 Sharks Found ({len(filtered_df)} results)")
+    # Tabela de candidatos filtrados
+    st.subheader(f"⚡ Momentum Candidates Found ({len(filtered_df)} results)")
     
     if len(filtered_df) == 0:
-        st.warning("No sharks match the current filters. Try adjusting the criteria.")
+        st.warning("No momentum candidates match the current filters. Try adjusting the criteria.")
     else:
         # Format the dataframe for display
         display_df = filtered_df.copy()
@@ -490,10 +561,12 @@ def display_results(sharks_df, silent_sharks_df, params, is_saved_data=False):
         change_short_label = f"{params['volume_period_short']}D Change"
         
         st.dataframe(
-            display_df[['ticker', 'ratio', 'volume_usd_7d_M', 'volume_usd_90d_M', 
+            display_df[['ticker', 'sector', 'industry', 'ratio', 'volume_usd_7d_M', 'volume_usd_90d_M', 
                        'price', 'price_90d_avg', 'change_7d', 'change_30d', 'score']].round(2),
             column_config={
                 'ticker': 'Ticker',
+                'sector': st.column_config.Column('Sector', width="medium"),
+                'industry': st.column_config.Column('Industry', width="medium"),
                 'ratio': st.column_config.NumberColumn('Volume Ratio', format="%.1fx"),
                 'volume_usd_7d_M': st.column_config.NumberColumn(vol_short_label, format="$%.1fM"),
                 'volume_usd_90d_M': st.column_config.NumberColumn(vol_long_label, format="$%.1fM"),
@@ -516,16 +589,16 @@ def display_results(sharks_df, silent_sharks_df, params, is_saved_data=False):
                 st.download_button(
                     label="📥 Download Filtered Results",
                     data=csv_data,
-                    file_name=f"sharks_filtered_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                    file_name=f"momentum_filtered_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
                     mime="text/csv"
                 )
         
         with col2:
-            csv_data_all = sharks_df.to_csv(index=False)
+            csv_data_all = momentum_df.to_csv(index=False)
             st.download_button(
-                label="📥 Download All Sharks",
+                label="📥 Download All Candidates",
                 data=csv_data_all,
-                file_name=f"sharks_all_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                file_name=f"momentum_all_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
                 mime="text/csv"
             )
 
@@ -536,7 +609,7 @@ def show_instructions():
     
     **How to use:** Download data → Adjust filters (optional) → Run analysis
     
-    Click **🔍 Run Shark Analysis** to start! 🏊‍♂️
+    Click **🔍 Run Momentum Analysis** to start! 🚀
     
     ---
     

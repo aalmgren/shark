@@ -80,19 +80,15 @@ def detect_volume_pattern(ticker_data):
     return gradual_pattern or recent_pattern
 
 def analyze_ticker(ticker_data):
-    """Analisa um ticker para padrões de volume"""
+    """Analisa um ticker para padrões de momentum"""
     try:
         # Ordenar por data
         ticker_data = ticker_data.sort_values('Date')
         
         ticker = ticker_data['ticker'].iloc[0]
-        if ticker == 'QS':
-            print(f"\nDEBUG QS - Início da análise")
         
         # Verificar mínimo de dados e último preço
         if len(ticker_data) < 90:
-            if ticker == 'QS':
-                print(f"❌ QS: Barrado por ter menos que 90 dias de dados ({len(ticker_data)} dias)")
             return None
             
         # Calcular volume em dinheiro (quantidade × preço)
@@ -108,20 +104,11 @@ def analyze_ticker(ticker_data):
         volume_7d = last_7d['Volume'].mean()
         price_90d_avg = ticker_data['Close'].tail(90).mean()
         
-        if ticker == 'QS':
-            print(f"Volume USD 90d: ${volume_usd_90d/1000000:.1f}M")
-            print(f"Volume USD 7d: ${volume_usd_7d/1000000:.1f}M")
-            print(f"Preço médio 90d: ${price_90d_avg:.2f}")
-        
         # Filtros
         if volume_usd_90d < 10000000:  # Filtro de liquidez - volume em USD mínimo de $10M/dia
-            if ticker == 'QS':
-                print(f"❌ QS: Barrado por volume USD 90d baixo (${volume_usd_90d/1000000:.1f}M < $10M)")
             return None
             
         if price_90d_avg <= 5.0:  # Filtro de preço médio
-            if ticker == 'QS':
-                print(f"❌ QS: Barrado por preço médio 90d baixo (${price_90d_avg:.2f} <= $5.00)")
             return None
         
         # Calcular variações de preço
@@ -129,8 +116,6 @@ def analyze_ticker(ticker_data):
         
         # Filtro de preço atual
         if current_price <= 10.0:
-            if ticker == 'QS':
-                print(f"❌ QS: Barrado por preço atual baixo (${current_price:.2f} <= $10.00)")
             return None
             
         price_7d_ago = ticker_data['Close'].iloc[-7]
@@ -139,26 +124,15 @@ def analyze_ticker(ticker_data):
         price_change_7d = ((current_price - price_7d_ago) / price_7d_ago) * 100
         price_change_30d = ((current_price - price_30d_ago) / price_30d_ago) * 100
         
-        if ticker == 'QS':
-            print(f"Variação 7d: {price_change_7d:.1f}%")
-            print(f"Variação 30d: {price_change_30d:.1f}%")
-        
         # Filtrar ações que desvalorizaram
         if price_change_7d <= 0 or price_change_30d <= 0:
-            if ticker == 'QS':
-                print(f"❌ QS: Barrado por variação negativa (7d: {price_change_7d:.1f}%, 30d: {price_change_30d:.1f}%)")
             return None
         
         # Ratio de volume em dinheiro
         volume_ratio = volume_usd_7d / volume_usd_90d if volume_usd_90d > 0 else 0
         
-        if ticker == 'QS':
-            print(f"Volume ratio: {volume_ratio:.1f}x")
-        
         # Nova verificação de padrão de volume
-        if volume_ratio >= 1.5 and detect_volume_pattern(ticker_data):  # Shark detectado
-            if ticker == 'QS':
-                print(f"✅ QS: Passou em todos os filtros!")
+        if volume_ratio >= 1.5 and detect_volume_pattern(ticker_data):  # Candidato a momentum detectado
             # Score baseado em volume e preço
             score = volume_ratio * (1 + price_change_7d / 100)
             
@@ -175,21 +149,24 @@ def analyze_ticker(ticker_data):
                 'change_30d': price_change_30d,
                 'score': score
             }
-        elif ticker == 'QS':
-            if volume_ratio < 1.5:
-                print(f"❌ QS: Barrado por volume ratio baixo ({volume_ratio:.1f}x < 1.5x)")
-            else:
-                print(f"❌ QS: Barrado por não ter padrão de volume válido")
     except Exception as e:
-        if ticker == 'QS':
-            print(f"❌ QS: Erro na análise: {str(e)}")
         pass
     return None
 
 def process_nasdaq_data():
-    """NADAR COM OS SHARKS - Detecta acumulação institucional via análise de volume"""
-    print("🦈 DETECTANDO SMART MONEY - NADAR COM OS SHARKS")
+    """MOMENTUM ANALYSIS - Detecta acumulação institucional via análise de volume"""
+    print("⚡ DETECTING MOMENTUM - FINDING HIGH-MOMENTUM STOCKS")
     print("=" * 60)
+    
+    # 0. Carregar dados de tickers com setores e indústrias
+    ticker_info_path = 'tick/tickers_with_sectors_deduped.csv'
+    if not os.path.exists(ticker_info_path):
+        print(f"❌ Arquivo de informações de ticker não encontrado em {ticker_info_path}")
+        return
+        
+    column_names = ['sector', 'industry', 'mcap', 'conid', 'name', 'ticker', 'exchange']
+    ticker_info_df = pd.read_csv(ticker_info_path, header=None, names=column_names)
+    print(f"ℹ️ Carregadas informações de {ticker_info_df['ticker'].nunique()} tickers.")
     
     # 1. Listar todos os arquivos CSV
     all_files = []
@@ -221,55 +198,61 @@ def process_nasdaq_data():
     ticker_groups = [group for _, group in df.groupby('ticker')]
     with mp.Pool() as pool:
         analyzed = pool.map(analyze_ticker, ticker_groups)
-        sharks = [shark for shark in analyzed if shark is not None]
+        candidates = [candidate for candidate in analyzed if candidate is not None]
     
-    if not sharks:
-        print("❌ Nenhum shark detectado")
+    if not candidates:
+        print("❌ Nenhum ativo com momentum detectado")
         return
     
     # 5. Ordenar e salvar resultados
-    sharks_df = pd.DataFrame(sharks)
-    sharks_df = sharks_df.sort_values('score', ascending=False)
+    momentum_df = pd.DataFrame(candidates)
     
-    # Salvar todos os sharks
-    sharks_df.to_csv('institutional_accumulation_candidates.csv', index=False)
+    # Adicionar informações de setor e indústria
+    momentum_df = pd.merge(momentum_df, ticker_info_df[['ticker', 'sector', 'industry']], on='ticker', how='left')
+    momentum_df['sector'].fillna('Unknown', inplace=True)
+    momentum_df['industry'].fillna('Unknown', inplace=True)
     
-    # Salvar silent sharks (baixa variação de preço)
-    silent_sharks = sharks_df[sharks_df['change_7d'] <= 5.0]
-    silent_sharks.to_csv('silent_sharks.csv', index=False)
+    momentum_df = momentum_df.sort_values('score', ascending=False)
+    
+    # Salvar todos os candidatos
+    momentum_df.to_csv('momentum_candidates.csv', index=False)
+    
+    # Salvar candidatos com momentum latente (baixa variação de preço)
+    latent_momentum = momentum_df[momentum_df['change_7d'] <= 5.0]
+    latent_momentum.to_csv('latent_momentum_candidates.csv', index=False)
     
     # 6. Exibir resultados
-    print("\n🦈 TOP 15 SHARKS DETECTADOS!")
+    print("\n⚡ TOP 15 MOMENTUM CANDIDATES!")
     print("=" * 115)
     print("TICKER  RATIO   VOL_7D($M)   VOL_90D($M)   PREÇO    AVG90    7D%    30D%    SCORE")
     print("-" * 115)
     
-    for _, shark in sharks_df.head(15).iterrows():
-        print(f"{shark['ticker']:<7} {shark['ratio']:.1f}x   ${shark['volume_usd_7d']/1000000:,.1f}M    ${shark['volume_usd_90d']/1000000:,.1f}M     ${shark['price']:<7.2f} ${shark['price_90d_avg']:<7.2f} {shark['change_7d']:>6.1f}% {shark['change_30d']:>6.1f}% {shark['score']:.1f}")
+    for _, candidate in momentum_df.head(15).iterrows():
+        print(f"{candidate['ticker']:<7} {candidate['ratio']:.1f}x   ${candidate['volume_usd_7d']/1000000:,.1f}M    ${candidate['volume_usd_90d']/1000000:,.1f}M     ${candidate['price']:<7.2f} {candidate['price_90d_avg']:<7.2f} {candidate['change_7d']:>6.1f}% {candidate['change_30d']:>6.1f}% {candidate['score']:.1f}")
     
-    # Exibir Silent Sharks
-    print("\n🤫 SILENT SHARKS (Variação ≤ 5%):")
+    # Exibir Latent Momentum
+    print("\n🤫 LATENT MOMENTUM (Variação de preço ≤ 5%):")
     print("=" * 115)
     print("TICKER  RATIO   VOL_7D($M)   VOL_90D($M)   PREÇO    AVG90    7D%    30D%    SCORE")
     print("-" * 115)
     
-    for _, shark in silent_sharks.iterrows():
-        print(f"{shark['ticker']:<7} {shark['ratio']:.1f}x   ${shark['volume_usd_7d']/1000000:,.1f}M    ${shark['volume_usd_90d']/1000000:,.1f}M     ${shark['price']:<7.2f} ${shark['price_90d_avg']:<7.2f} {shark['change_7d']:>6.1f}% {shark['change_30d']:>6.1f}% {shark['score']:.1f}")
+    for _, candidate in latent_momentum.iterrows():
+        print(f"{candidate['ticker']:<7} {candidate['ratio']:.1f}x   ${candidate['volume_usd_7d']/1000000:,.1f}M    ${candidate['volume_usd_90d']/1000000:,.1f}M     ${candidate['price']:<7.2f} {candidate['price_90d_avg']:<7.2f} {candidate['change_7d']:>6.1f}% {candidate['change_30d']:>6.1f}% {candidate['score']:.1f}")
     
     # Estatísticas
-    print(f"\n📊 CATEGORIZAÇÃO DOS SHARKS:")
-    print(f"🦈 MEGA SHARKS (3x+ volume):     {len(sharks_df[sharks_df['ratio'] >= 3])} ações")
-    print(f"🦈 BIG SHARKS (2-3x volume):     {len(sharks_df[(sharks_df['ratio'] >= 2) & (sharks_df['ratio'] < 3)])} ações")
-    print(f"🦈 SHARKS (1.5-2x volume):       {len(sharks_df[(sharks_df['ratio'] >= 1.5) & (sharks_df['ratio'] < 2)])} ações")
-    print(f"🤫 SILENT SHARKS (estável ≤5%):  {len(silent_sharks)} ações")
+    print(f"\n📊 CATEGORIZAÇÃO DO MOMENTUM:")
+    print(f"⚡ VERY HIGH MOMENTUM (3x+ volume):     {len(momentum_df[momentum_df['ratio'] >= 3])} ativos")
+    print(f"⚡ HIGH MOMENTUM (2-3x volume):         {len(momentum_df[(momentum_df['ratio'] >= 2) & (momentum_df['ratio'] < 3)])} ativos")
+    print(f"⚡ MOMENTUM (1.5-2x volume):          {len(momentum_df[(momentum_df['ratio'] >= 1.5) & (momentum_df['ratio'] < 2)])} ativos")
+    print(f"🤫 LATENT MOMENTUM (preço estável ≤5%): {len(latent_momentum)} ativos")
     
     print(f"\n💾 ARQUIVOS ATUALIZADOS:")
-    print(f"🦈 Todos os sharks:   institutional_accumulation_candidates.csv ({len(sharks_df)} tickers)")
-    print(f"🤫 Silent sharks:     silent_sharks.csv ({len(silent_sharks)} tickers)")
+    print(f"⚡ Todos os candidatos:   momentum_candidates.csv ({len(momentum_df)} tickers)")
+    print(f"🤫 Momentum latente:      latent_momentum_candidates.csv ({len(latent_momentum)} tickers)")
     print(f"📅 Última atualização: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     
-    print("\n✅ SHARK DETECTION CONCLUÍDA!")
-    print("🏊‍♂️ Hora de nadar com os sharks! 🦈")
+    print("\n✅ MOMENTUM ANALYSIS CONCLUÍDA!")
+    print("🚀 Hora de surfar na onda do momentum!")
 
 if __name__ == "__main__":
     process_nasdaq_data() 
