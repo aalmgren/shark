@@ -4,14 +4,15 @@ import os
 from datetime import datetime
 import multiprocessing as mp
 from functools import partial
+from shared_params import load_analysis_params
 
 def process_file(file_info):
     """Processa um único arquivo CSV"""
     file_path, filename = file_info
     try:
         # Ignorar warrants, units, rights, preferreds e outros derivativos
-        ticker = filename.split('_')[0]
-        if ticker.endswith(('W', 'WS', 'U', 'R', 'P', 'PR', 'X', 'L', 'Z')):
+        ticker = filename.split('.')[0] # Corrigido para pegar o ticker corretamente
+        if ticker.endswith(('.WT', '.U', '.R', '.P', 'W', 'WS', 'PR', 'X', 'L', 'Z')):
             return None
             
         # Ler apenas colunas necessárias
@@ -22,64 +23,12 @@ def process_file(file_info):
         df['ticker'] = ticker
         df['Date'] = pd.to_datetime(df['Date'], utc=True)
         return df
-    except:
+    except Exception as e:
+        # print(f"Erro processando {filename}: {e}") # Opcional: para depuração
         pass
     return None
 
-def detect_volume_pattern(ticker_data):
-    """Detecta padrões de volume - gradual ou recente"""
-    # Calcular MA3 do volume em dinheiro
-    ticker_data['volume_usd'] = ticker_data['Volume'] * ticker_data['Close']
-    ticker_data['volume_ma3'] = ticker_data['volume_usd'].rolling(window=3).mean()
-    
-    # Últimos 20 dias para análise
-    recent_data = ticker_data.tail(20).copy()
-    volume_mean = recent_data['volume_usd'].mean()
-    
-    # Verificar crescimento dos últimos dias (MA3)
-    last_3_ma = recent_data['volume_ma3'].tail(3).values
-    last_5_ma = recent_data['volume_ma3'].tail(5).values
-    
-    # Verificar se há volumes decrescentes após spike nos últimos dias
-    last_3_volumes = recent_data['volume_usd'].tail(3).values
-    if len(last_3_volumes) >= 3:
-        # Se tiver um spike seguido de volumes decrescentes, rejeita
-        if last_3_volumes[0] > (volume_mean * 2):  # Volume 2x maior que média
-            if last_3_volumes[1] < last_3_volumes[0] and last_3_volumes[2] < last_3_volumes[1]:
-                return False
-    
-    # Padrão Gradual (4+ dias)
-    gradual_pattern = False
-    if len(last_5_ma) >= 4:
-        # Verificar se há 4 dias consecutivos de crescimento
-        for i in range(len(last_5_ma)-3):
-            if all(last_5_ma[j] > last_5_ma[j-1] for j in range(i+1, i+4)):
-                gradual_pattern = True
-                break
-    
-    # Padrão Recente (2-3 dias)
-    recent_pattern = False
-    if len(last_3_ma) >= 2:
-        # Volume crescente nos últimos 2-3 dias
-        volume_growing = all(last_3_ma[i] > last_3_ma[i-1] for i in range(1, len(last_3_ma)))
-        # Volume atual pelo menos 2x a média anterior
-        volume_significant = last_3_ma[-1] > 2 * volume_mean
-        # Preço subindo junto
-        price_up = recent_data['Close'].iloc[-1] > recent_data['Close'].iloc[-2]
-        
-        # Verificar se não há queda significativa após crescimento
-        if volume_growing:
-            last_volumes = recent_data['volume_usd'].tail(3).values
-            if len(last_volumes) >= 2:
-                # Se o último volume for significativamente menor que o anterior, rejeita
-                if last_volumes[-1] < last_volumes[-2] * 0.7:  # Queda de mais de 30%
-                    volume_growing = False
-        
-        recent_pattern = volume_growing and volume_significant and price_up
-    
-    return gradual_pattern or recent_pattern
-
-def analyze_ticker(ticker_data):
+def analyze_ticker(ticker_data, params):
     """Analisa um ticker para padrões de momentum"""
     try:
         # Ordenar por data
@@ -87,99 +36,102 @@ def analyze_ticker(ticker_data):
         
         ticker = ticker_data['ticker'].iloc[0]
         
-        # Verificar mínimo de dados e último preço
-        if len(ticker_data) < 90:
+        # Parâmetros da análise
+        long_period = params.get('volume_period_long', 90)
+        short_period = params.get('volume_period_short', 7)
+        
+        # Verificar mínimo de dados para os períodos
+        if len(ticker_data) < (long_period + short_period):
             return None
             
         # Calcular volume em dinheiro (quantidade × preço)
         ticker_data['volume_usd'] = ticker_data['Volume'] * ticker_data['Close']
             
-        # Calcular médias de volume e preço
-        last_7d = ticker_data.tail(7)
-        previous_90d = ticker_data.iloc[-97:-7] if len(ticker_data) >= 97 else ticker_data.iloc[:-7]
+        # Calcular médias de volume
+        last_short_period = ticker_data.tail(short_period)
+        previous_long_period = ticker_data.iloc[-(long_period + short_period):-short_period]
         
-        volume_usd_90d = previous_90d['volume_usd'].mean()
-        volume_usd_7d = last_7d['volume_usd'].mean()
-        volume_90d = previous_90d['Volume'].mean()
-        volume_7d = last_7d['Volume'].mean()
-        price_90d_avg = ticker_data['Close'].tail(90).mean()
+        volume_usd_long = previous_long_period['volume_usd'].mean()
+        volume_usd_short = last_short_period['volume_usd'].mean()
         
-        # Filtros
-        if volume_usd_90d < 10000000:  # Filtro de liquidez - volume em USD mínimo de $10M/dia
-            return None
-            
-        if price_90d_avg <= 5.0:  # Filtro de preço médio
+        # Se o ratio for zero ou menor que 1, não há porque continuar
+        if volume_usd_long == 0 or (volume_usd_short / volume_usd_long) < 1.0:
             return None
         
-        # Calcular variações de preço
-        current_price = ticker_data['Close'].iloc[-1]
+        # Continuar com outros cálculos se o ratio for válido
+        volume_long = previous_long_period['Volume'].mean()
+        volume_short = last_short_period['Volume'].mean()
         
-        # Filtro de preço atual
-        if current_price <= 10.0:
+        # Calcular médias de preço para os períodos de baseline e spike
+        avg_price_long = previous_long_period['Close'].mean()
+        avg_price_short = last_short_period['Close'].mean()
+
+        # Calcular variação percentual entre as médias de preço
+        avg_price_change_pct = ((avg_price_short - avg_price_long) / avg_price_long) * 100 if avg_price_long > 0 else 0
+        
+        # Filtro: Descartar se a variação de preço entre as médias for negativa
+        if avg_price_change_pct < 0:
             return None
-            
-        price_7d_ago = ticker_data['Close'].iloc[-7]
-        price_30d_ago = ticker_data['Close'].iloc[-30]
+
+        # Calcular ratio de volume
+        volume_ratio = volume_usd_short / volume_usd_long
         
-        price_change_7d = ((current_price - price_7d_ago) / price_7d_ago) * 100
-        price_change_30d = ((current_price - price_30d_ago) / price_30d_ago) * 100
+        # Score baseado em volume e na nova variação de preço
+        score = volume_ratio * (1 + avg_price_change_pct / 100)
         
-        # Filtrar ações que desvalorizaram
-        if price_change_7d <= 0 or price_change_30d <= 0:
-            return None
-        
-        # Ratio de volume em dinheiro
-        volume_ratio = volume_usd_7d / volume_usd_90d if volume_usd_90d > 0 else 0
-        
-        # Nova verificação de padrão de volume
-        if volume_ratio >= 1.5 and detect_volume_pattern(ticker_data):  # Candidato a momentum detectado
-            # Score baseado em volume e preço
-            score = volume_ratio * (1 + price_change_7d / 100)
-            
-            return {
-                'ticker': ticker_data['ticker'].iloc[0],
-                'ratio': volume_ratio,
-                'volume_7d': volume_7d,
-                'volume_90d': volume_90d,
-                'volume_usd_7d': volume_usd_7d,
-                'volume_usd_90d': volume_usd_90d,
-                'price': current_price,
-                'price_90d_avg': price_90d_avg,
-                'change_7d': price_change_7d,
-                'change_30d': price_change_30d,
-                'score': score
-            }
+        result = {
+            'ticker': ticker,
+            'ratio': volume_ratio,
+            'volume_short': volume_short,
+            'volume_long': volume_long,
+            'volume_usd_short': volume_usd_short,
+            'volume_usd_long': volume_usd_long,
+            'price': ticker_data['Close'].iloc[-1], # Manter o preço atual para referência
+            'avg_price_long': avg_price_long,
+            'avg_price_short': avg_price_short,
+            'avg_price_change_pct': avg_price_change_pct,
+            'score': score
+        }
+        return result
+
     except Exception as e:
+        # print(f"Erro analisando {ticker_data['ticker'].iloc[0]}: {e}") # Opcional: para depuração
         pass
     return None
 
 def process_nasdaq_data():
     """MOMENTUM ANALYSIS - Detecta acumulação institucional via análise de volume"""
-    print("⚡ DETECTING MOMENTUM - FINDING HIGH-MOMENTUM STOCKS")
+    print("DETECTING MOMENTUM - FINDING HIGH-MOMENTUM STOCKS")
     print("=" * 60)
+
+    # Carregar parâmetros de análise
+    params = load_analysis_params()
+    print(f"Analysis Parameters: Long Period={params['volume_period_long']}d, Short Period={params['volume_period_short']}d")
     
     # 0. Carregar dados de tickers com setores e indústrias
-    ticker_info_path = 'tick/tickers_with_sectors_deduped.csv'
+    ticker_info_path = 'tick/tickers.csv' # Usando o arquivo original de tickers
     if not os.path.exists(ticker_info_path):
-        print(f"❌ Arquivo de informações de ticker não encontrado em {ticker_info_path}")
+        print(f"Ticker info file not found at {ticker_info_path}")
         return
         
-    column_names = ['sector', 'industry', 'mcap', 'conid', 'name', 'ticker', 'exchange']
-    ticker_info_df = pd.read_csv(ticker_info_path, header=None, names=column_names)
-    print(f"ℹ️ Carregadas informações de {ticker_info_df['ticker'].nunique()} tickers.")
+    ticker_info_df = pd.read_csv(ticker_info_path)
+    # A coluna 'ticker' já existe, o rename não é necessário e pode causar erro se 'Symbol' não existir.
+    # ticker_info_df.rename(columns={'Symbol': 'ticker'}, inplace=True) 
+    print(f"Loaded info for {ticker_info_df['ticker'].nunique()} tickers.")
     
-    # 1. Listar todos os arquivos CSV
-    all_files = []
-    for data_dir in ['DB', 'additional_database']:
-        if os.path.exists(data_dir):
-            files = [(os.path.join(data_dir, f), f) for f in os.listdir(data_dir) if f.endswith('.csv')]
-            all_files.extend(files)
+    # 1. Listar todos os arquivos CSV no diretório DB
+    data_dir = 'DB'
+    if not os.path.exists(data_dir):
+        print(f"Data directory '{data_dir}' not found.")
+        return
+
+    all_files = [(os.path.join(data_dir, f), f) for f in os.listdir(data_dir) if f.endswith('.csv')]
     
     if not all_files:
-        print("❌ Nenhum arquivo CSV encontrado")
+        print("No CSV files found in the DB directory")
         return
     
-    print(f"📊 Processando {len(all_files)} arquivos...")
+    print(f"Processing {len(all_files)} files...")
     
     # 2. Processar arquivos em paralelo
     with mp.Pool() as pool:
@@ -187,72 +139,82 @@ def process_nasdaq_data():
         all_data = [df for df in processed if df is not None]
     
     if not all_data:
-        print("❌ Nenhum dado válido encontrado")
+        print("No valid data found after initial processing.")
         return
     
     # 3. Consolidar dados
     df = pd.concat(all_data, ignore_index=True)
-    print(f"✅ Dados carregados: {len(df):,} registros de {df['ticker'].nunique()} empresas")
+    print(f"Data loaded: {len(df):,} records from {df['ticker'].nunique()} companies")
     
     # 4. Analisar cada ticker em paralelo
     ticker_groups = [group for _, group in df.groupby('ticker')]
+    
+    # Criar uma função parcial com os parâmetros fixos
+    analyze_func = partial(analyze_ticker, params=params)
+
     with mp.Pool() as pool:
-        analyzed = pool.map(analyze_ticker, ticker_groups)
+        analyzed = pool.map(analyze_func, ticker_groups)
         candidates = [candidate for candidate in analyzed if candidate is not None]
     
     if not candidates:
-        print("❌ Nenhum ativo com momentum detectado")
+        print("No candidates with volume increase detected with current parameters.")
         return
     
     # 5. Ordenar e salvar resultados
     momentum_df = pd.DataFrame(candidates)
     
-    # Adicionar informações de setor e indústria
-    momentum_df = pd.merge(momentum_df, ticker_info_df[['ticker', 'sector', 'industry']], on='ticker', how='left')
-    momentum_df['sector'].fillna('Unknown', inplace=True)
-    momentum_df['industry'].fillna('Unknown', inplace=True)
+    # Adicionar informações de setor e indústria (usando nomes de coluna em minúsculo)
+    if 'sector' in ticker_info_df.columns and 'industry' in ticker_info_df.columns:
+        momentum_df = pd.merge(momentum_df, ticker_info_df[['ticker', 'sector', 'industry']], on='ticker', how='left')
+    else:
+        momentum_df['sector'] = 'Unknown'
+        momentum_df['industry'] = 'Unknown'
+
+    momentum_df['sector'] = momentum_df['sector'].fillna('Unknown')
+    momentum_df['industry'] = momentum_df['industry'].fillna('Unknown')
     
     momentum_df = momentum_df.sort_values('score', ascending=False)
+
+    # Renomear colunas para clareza no arquivo de saída
+    final_columns = {
+        'volume_short': f'volume_{params["volume_period_short"]}d',
+        'volume_long': f'volume_{params["volume_period_long"]}d',
+        'volume_usd_short': f'volume_usd_{params["volume_period_short"]}d',
+        'volume_usd_long': f'volume_usd_{params["volume_period_long"]}d',
+        'avg_price_long': f'avg_price_{params["volume_period_long"]}d',
+        'avg_price_short': f'avg_price_{params["volume_period_short"]}d'
+    }
+    momentum_df.rename(columns=final_columns, inplace=True)
     
     # Salvar todos os candidatos
-    momentum_df.to_csv('momentum_candidates.csv', index=False)
-    
-    # Salvar candidatos com momentum latente (baixa variação de preço)
-    latent_momentum = momentum_df[momentum_df['change_7d'] <= 5.0]
-    latent_momentum.to_csv('latent_momentum_candidates.csv', index=False)
+    output_file = 'institutional_accumulation_candidates.csv'
+    momentum_df.to_csv(output_file, index=False)
     
     # 6. Exibir resultados
-    print("\n⚡ TOP 15 MOMENTUM CANDIDATES!")
+    print(f"\nTOP 15 CANDIDATES ({params['volume_period_short']}d vs {params['volume_period_long']}d)")
     print("=" * 115)
-    print("TICKER  RATIO   VOL_7D($M)   VOL_90D($M)   PREÇO    AVG90    7D%    30D%    SCORE")
+    header = f"TICKER  RATIO   VOL_{params['volume_period_short']}D($M)   VOL_{params['volume_period_long']}D($M)   PRECO    AVG_PRICE_{params['volume_period_long']}D   CHANGE(%)    SCORE"
+    print(header)
     print("-" * 115)
     
+    # Nomes das colunas para usar na impressão
+    vol_usd_short_col = f'volume_usd_{params["volume_period_short"]}d'
+    vol_usd_long_col = f'volume_usd_{params["volume_period_long"]}d'
+    avg_price_long_col = f'avg_price_{params["volume_period_long"]}d'
+
     for _, candidate in momentum_df.head(15).iterrows():
-        print(f"{candidate['ticker']:<7} {candidate['ratio']:.1f}x   ${candidate['volume_usd_7d']/1000000:,.1f}M    ${candidate['volume_usd_90d']/1000000:,.1f}M     ${candidate['price']:<7.2f} {candidate['price_90d_avg']:<7.2f} {candidate['change_7d']:>6.1f}% {candidate['change_30d']:>6.1f}% {candidate['score']:.1f}")
-    
-    # Exibir Latent Momentum
-    print("\n🤫 LATENT MOMENTUM (Variação de preço ≤ 5%):")
-    print("=" * 115)
-    print("TICKER  RATIO   VOL_7D($M)   VOL_90D($M)   PREÇO    AVG90    7D%    30D%    SCORE")
-    print("-" * 115)
-    
-    for _, candidate in latent_momentum.iterrows():
-        print(f"{candidate['ticker']:<7} {candidate['ratio']:.1f}x   ${candidate['volume_usd_7d']/1000000:,.1f}M    ${candidate['volume_usd_90d']/1000000:,.1f}M     ${candidate['price']:<7.2f} {candidate['price_90d_avg']:<7.2f} {candidate['change_7d']:>6.1f}% {candidate['change_30d']:>6.1f}% {candidate['score']:.1f}")
+        print(f"{candidate['ticker']:<7} {candidate['ratio']:.1f}x   ${candidate[vol_usd_short_col]/1000000:,.1f}M    ${candidate[vol_usd_long_col]/1000000:,.1f}M     ${candidate['price']:<7.2f} {candidate[avg_price_long_col]:<7.2f} {candidate['avg_price_change_pct']:>11.1f}% {candidate['score']:.1f}")
     
     # Estatísticas
-    print(f"\n📊 CATEGORIZAÇÃO DO MOMENTUM:")
-    print(f"⚡ VERY HIGH MOMENTUM (3x+ volume):     {len(momentum_df[momentum_df['ratio'] >= 3])} ativos")
-    print(f"⚡ HIGH MOMENTUM (2-3x volume):         {len(momentum_df[(momentum_df['ratio'] >= 2) & (momentum_df['ratio'] < 3)])} ativos")
-    print(f"⚡ MOMENTUM (1.5-2x volume):          {len(momentum_df[(momentum_df['ratio'] >= 1.5) & (momentum_df['ratio'] < 2)])} ativos")
-    print(f"🤫 LATENT MOMENTUM (preço estável ≤5%): {len(latent_momentum)} ativos")
+    print(f"\nVOLUME STATISTICS:")
+    print(f"  - Total candidates with volume increase: {len(momentum_df)} tickers")
     
-    print(f"\n💾 ARQUIVOS ATUALIZADOS:")
-    print(f"⚡ Todos os candidatos:   momentum_candidates.csv ({len(momentum_df)} tickers)")
-    print(f"🤫 Momentum latente:      latent_momentum_candidates.csv ({len(latent_momentum)} tickers)")
-    print(f"📅 Última atualização: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"\nFILE UPDATED:")
+    print(f"  - Candidates saved to: {output_file} ({len(momentum_df)} tickers)")
+    print(f"  - Last update: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     
-    print("\n✅ MOMENTUM ANALYSIS CONCLUÍDA!")
-    print("🚀 Hora de surfar na onda do momentum!")
+    print("\nANALYSIS COMPLETED!")
+    print("Use the results for your own analysis.")
 
 if __name__ == "__main__":
     process_nasdaq_data() 
